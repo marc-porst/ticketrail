@@ -1,0 +1,26 @@
+node_modules/
+.DS_Store
+*.log
+.ticketrail/.locks/
+.ticketrail/.runtime/
+
+# This checkout's own board ships with just the welcome card. Work on your own
+# projects (add them as spaces); cards and files made here are never committed.
+.ticketrail/tasks/*
+!.ticketrail/tasks/t_mvdxqulki5dz.json
+.ticketrail/files/
+.ticketrail/folders.json
+# Boards from before the rename to Ticketrail
+.promptkanban/
+
+# Written per machine by `ticketrail init` — the paths inside are machine-specific
+.claude/commands/ticketrail-add.md
+.claude/commands/ticketrail-work.md
+.claude/commands/ticketrail-start.md
+.claude/skills/ticketrail/
+# …and their names before the rename
+.claude/commands/kanban-add.md
+.claude/commands/kanban-work.md
+.claude/commands/start-kanban.md
+.claude/skills/prompt-kanban/
+promptkanban_changes/

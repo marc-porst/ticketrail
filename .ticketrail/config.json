@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "port": 4321,
+  "title": "Ticketrail",
+  "notifications": {
+    "sound": true,
+    "desktop": true,
+    "onStart": false
+  },
+  "recordModel": true
+}
