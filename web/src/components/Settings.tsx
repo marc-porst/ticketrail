@@ -52,7 +52,7 @@ export function Settings({
       </button>
 
       {open && (
-        <div className="absolute top-full right-0 z-50 mt-1.5 w-[300px] overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] shadow-2xl shadow-black/60">
+        <div className="absolute top-full right-0 z-50 mt-1.5 w-[300px] overflow-hidden rounded-xl border border-white/[0.08] bg-[var(--color-surface-2)] pk-panel">
           <p className="border-b border-[var(--color-line)] px-3 py-2 text-[10.5px] font-semibold tracking-wide text-zinc-500 uppercase">
             Alerts
           </p>

@@ -53,9 +53,9 @@ export function FoldersModal({
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-6" role="dialog" aria-modal="true" aria-label="Folders">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="pk-scrim absolute inset-0" onClick={onClose} />
 
-      <div className="relative flex max-h-full w-full max-w-[480px] flex-col overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-1)] shadow-2xl shadow-black/60">
+      <div className="relative flex max-h-full w-full max-w-[480px] flex-col overflow-hidden rounded-2xl border border-white/[0.07] bg-[var(--color-surface-1)] pk-panel">
         <header className="flex items-baseline gap-3 border-b border-[var(--color-line)] px-5 py-4">
           <h2 className="text-[15px] font-semibold tracking-tight text-zinc-100">Folders</h2>
           <p className="text-[11px] text-zinc-600">Optional groups, shown in every lane</p>

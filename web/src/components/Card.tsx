@@ -20,38 +20,45 @@ export function CardFace({
   return (
     <div
       className={cx(
-        'rounded-xl border bg-[var(--color-surface-2)] px-3 py-2.5 text-left shadow-sm transition',
-        waiting ? 'border-amber-500/50 shadow-amber-950/40' : 'border-[var(--color-line)]',
-        dragging ? 'rotate-2 scale-[1.02] shadow-xl shadow-black/60' : 'hover:border-zinc-600',
+        'pk-card relative overflow-hidden rounded-[10px] border px-3 pt-2.5 pb-2 text-left',
+        waiting ? 'border-amber-400/40' : live ? 'border-emerald-400/25' : 'border-white/[0.06]',
+        dragging ? 'pk-card-dragging rotate-[1.5deg] scale-[1.02]' : 'hover:border-white/[0.12]',
       )}
     >
+      {/* a status rail on the leading edge: live work and open questions read at a glance */}
+      {(live || waiting) && (
+        <span
+          aria-hidden="true"
+          className={cx('absolute inset-y-2 left-0 w-[2px] rounded-r-full', waiting ? 'bg-amber-400' : 'bg-emerald-400')}
+        />
+      )}
       <div className="flex items-start gap-2">
-        {live && <span className={cx('mt-1.5 size-1.5 shrink-0 rounded-full pk-live', accent.dot)} />}
-        <p className="flex-1 text-[13.5px] leading-snug font-medium text-zinc-100">{task.title}</p>
+        {live && <span className={cx('pk-ping mt-[7px] size-1.5 shrink-0 rounded-full', accent.dot)} />}
+        <p className="flex-1 text-[13.5px] leading-[1.4] font-medium tracking-[-0.005em] text-zinc-100">{task.title}</p>
         {!live && task.worker && (
-          <span className="mt-0.5 shrink-0 rounded bg-sky-400/10 px-1.5 py-px font-mono text-[10px] text-sky-300/80" title={`Only worker ${task.worker} takes this card`}>
+          <span className="mt-0.5 shrink-0 rounded-[4px] bg-sky-400/10 px-1.5 py-px font-mono text-[10px] text-sky-300/80" title={`Only worker ${task.worker} takes this card`}>
             → {task.worker}
           </span>
         )}
         {live && task.claimedBy && (
-          <span className="mt-0.5 shrink-0 rounded bg-sky-400/10 px-1.5 py-px font-mono text-[10px] text-sky-300" title={`Worked by ${task.claimedBy}`}>
+          <span className="mt-0.5 shrink-0 rounded-[4px] bg-emerald-400/10 px-1.5 py-px font-mono text-[10px] text-emerald-300" title={`Worked by ${task.claimedBy}`}>
             {task.claimedBy}
           </span>
         )}
       </div>
 
       {live && lastActivity && (
-        <p className="mt-1.5 truncate text-[11px] text-emerald-300/70">{lastActivity.text}</p>
+        <p className="mt-1.5 truncate text-[11px] text-emerald-300/75">{lastActivity.text}</p>
       )}
 
       {waiting && (
-        <p className="mt-1.5 line-clamp-2 text-[11px] leading-snug text-amber-200/90">{waiting.text}</p>
+        <p className="mt-2 line-clamp-2 rounded-md bg-amber-400/[0.07] px-2 py-1.5 text-[11.5px] leading-snug text-amber-100/90">{waiting.text}</p>
       )}
 
       {task.labels.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-1">
           {task.labels.slice(0, 3).map((label) => (
-            <span key={label} className={cx('rounded px-1.5 py-0.5 text-[10px] font-medium', labelTone(label))}>
+            <span key={label} className={cx('rounded-[4px] px-1.5 py-px text-[10.5px] font-medium', labelTone(label))}>
               {label}
             </span>
           ))}
@@ -61,7 +68,7 @@ export function CardFace({
         </div>
       )}
 
-      <div className="mt-2 flex items-center gap-2.5 text-[10.5px] text-zinc-500">
+      <div className="mt-2.5 flex items-center gap-2.5 border-t border-white/[0.04] pt-2 text-[10.5px] text-zinc-500">
         <span className="font-mono text-zinc-600">#{task.number}</span>
         {task.type && (
           <span className="text-zinc-400" title={`Type: ${TYPE_LABELS[task.type]}`}>
@@ -95,7 +102,7 @@ export function CardFace({
             <Glyph d="M2 8h3l2-4 2 8 2-4h3" /> {task.activity.length}
           </span>
         )}
-        <span className="ml-auto shrink-0">{relativeTime(task.updatedAt)}</span>
+        <span className="pk-num ml-auto shrink-0 text-zinc-600">{relativeTime(task.updatedAt)}</span>
       </div>
     </div>
   );
@@ -145,10 +152,10 @@ export function Card({
   const droppable = useDroppable({ id: `card:${task.id}`, data: { taskId: task.id } });
 
   return (
-    <div ref={droppable.setNodeRef} className="relative">
+    <div ref={droppable.setNodeRef} className="pk-rise relative">
       {insertBefore && <div className="absolute -top-1 right-0 left-0 h-0.5 rounded-full bg-sky-400" />}
       {linkTarget && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-end justify-center rounded-xl bg-sky-500/10 pb-1.5 outline-2 outline-sky-400 outline-dashed">
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-end justify-center rounded-[10px] bg-sky-500/10 pb-1.5 outline-2 outline-sky-400 outline-dashed">
           <span className="rounded-full bg-sky-500/90 px-2 py-0.5 text-[10.5px] font-semibold text-white shadow">
             Link as related
           </span>
@@ -159,7 +166,7 @@ export function Card({
         {...draggable.listeners}
         {...draggable.attributes}
         onClick={() => onOpen(task)}
-        className={cx('block w-full cursor-grab touch-none active:cursor-grabbing', draggable.isDragging && 'opacity-30')}
+        className={cx('block w-full cursor-grab touch-none rounded-[10px] active:cursor-grabbing', draggable.isDragging && 'opacity-30')}
       >
         <CardFace task={task} referencedBy={referencedBy} />
       </button>

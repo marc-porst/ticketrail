@@ -95,7 +95,7 @@ export function FolderIcon({ className }: { className?: string }) {
 /** What follows the pointer while a folder is being sorted. */
 export function FolderDragFace({ folder }: { folder: Folder }) {
   return (
-    <div className="flex w-[272px] items-center gap-2 rounded-lg border border-sky-400/60 bg-[var(--color-surface-2)] px-2 py-1.5 shadow-xl shadow-black/60">
+    <div className="flex w-[272px] items-center gap-2 pk-card-dragging rounded-lg border border-sky-400/60 bg-[var(--color-surface-2)] px-2 py-1.5">
       <FolderIcon className={FOLDER_TONE[folder.color].text} />
       <span className="truncate text-[12px] font-medium text-zinc-200">{folder.name}</span>
     </div>

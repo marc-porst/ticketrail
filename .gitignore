@@ -13,14 +13,6 @@ node_modules/
 # Boards from before the rename to Ticketrail
 .promptkanban/
 
-# Written per machine by `ticketrail init` — the paths inside are machine-specific
-.claude/commands/ticketrail-add.md
-.claude/commands/ticketrail-work.md
-.claude/commands/ticketrail-start.md
-.claude/skills/ticketrail/
-# …and their names before the rename
-.claude/commands/kanban-add.md
-.claude/commands/kanban-work.md
-.claude/commands/start-kanban.md
-.claude/skills/prompt-kanban/
+# Claude Code's per-project folder (commands, skills, agents, local settings) stays local
+.claude/
 promptkanban_changes/

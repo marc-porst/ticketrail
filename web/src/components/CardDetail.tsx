@@ -118,9 +118,9 @@ export function CardDetail({
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="pk-scrim absolute inset-0" onClick={onClose} />
 
-      <aside className="pk-drawer relative flex h-full w-full max-w-[560px] flex-col border-l border-[var(--color-line)] bg-[var(--color-surface-1)] shadow-2xl">
+      <aside className="pk-drawer relative flex h-full w-full max-w-[580px] flex-col border-l border-white/[0.07] bg-[var(--color-surface-1)]">
         <header className="border-b border-[var(--color-line)] px-5 py-4">
           <div className="flex items-start gap-3">
             <span className="mt-1 font-mono text-[11px] text-zinc-600">#{task.number}</span>

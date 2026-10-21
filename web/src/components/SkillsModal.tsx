@@ -160,9 +160,9 @@ export function SkillsModal({
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center p-4 sm:p-6" role="dialog" aria-modal="true" aria-label="Skills">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" onClick={() => leave(onClose)} />
+      <div className="pk-scrim absolute inset-0" onClick={() => leave(onClose)} />
 
-      <div className="relative flex h-[85vh] w-full max-w-[1100px] flex-col overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-1)] shadow-2xl shadow-black/60">
+      <div className="relative flex h-[85vh] w-full max-w-[1100px] flex-col overflow-hidden rounded-2xl border border-white/[0.07] bg-[var(--color-surface-1)] pk-panel">
         <header className="flex items-baseline gap-3 border-b border-[var(--color-line)] px-5 py-4">
           <h2 className="text-[15px] font-semibold tracking-tight text-zinc-100">Skills</h2>
           <p className="hidden text-[11px] text-zinc-600 sm:block">

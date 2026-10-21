@@ -66,33 +66,35 @@ export function ColumnView({
   };
 
   return (
-    <section className="flex h-full w-[288px] shrink-0 flex-col">
-      <header className="mb-2 px-1">
+    <section className="pk-lane flex h-full w-[300px] shrink-0 flex-col rounded-2xl">
+      <header className="px-3.5 pt-3.5 pb-2.5">
         <div className="flex items-center gap-2">
-          <span className={cx('size-1.5 rounded-full', accent.dot)} />
-          <h2 className="text-[12px] font-semibold tracking-wide text-zinc-200 uppercase">{meta.label}</h2>
-          <span className={cx('rounded-full px-1.5 py-px text-[10.5px] font-medium', accent.soft, accent.text)}>
+          <span className={cx('size-2 rounded-[3px]', accent.dot)} />
+          <h2 className="text-[13.5px] font-semibold tracking-[-0.01em] text-zinc-100">{meta.label}</h2>
+          <span className={cx('pk-num rounded-md px-1.5 py-px font-mono text-[10.5px] font-medium', accent.soft, accent.text)}>
             {tasks.length}
           </span>
           {groups.length > 0 && collapsed && (
             <button
               onClick={() => collapsed.setAll(meta.id, groups.map((g) => g.folder.id), !allCollapsed)}
-              className="ml-auto text-[10.5px] text-zinc-600 transition hover:text-zinc-300"
+              className="ml-auto rounded px-1 text-[10.5px] text-zinc-600 hover:text-zinc-300"
               title={allCollapsed ? 'Open every folder in this lane' : 'Collapse every folder in this lane'}
             >
-              {allCollapsed ? 'expand all' : 'collapse all'}
+              {allCollapsed ? 'Expand all' : 'Collapse all'}
             </button>
           )}
         </div>
-        <p className="mt-1 h-7 text-[11px] leading-snug text-zinc-600">{meta.hint}</p>
-        <div className={cx('mt-1 h-0.5 rounded-full', accent.bar)} />
+        <p className="mt-1 h-7 text-[11px] leading-snug text-zinc-500">{meta.hint}</p>
+        <div className="mt-2 h-px bg-white/[0.05]">
+          <div className={cx('h-px w-10 rounded-full', accent.bar)} />
+        </div>
       </header>
 
       <div
         ref={setNodeRef}
         className={cx(
-          'flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto rounded-xl p-1.5 transition-colors',
-          isOver ? 'bg-white/[0.04] outline outline-dashed outline-zinc-700' : 'bg-transparent',
+          'mx-1.5 mb-1.5 flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto rounded-xl p-1.5 transition-colors duration-200',
+          isOver ? 'bg-sky-400/[0.05] outline outline-dashed outline-sky-400/40' : 'bg-transparent',
         )}
       >
         {unfiled.map(card)}
@@ -113,7 +115,7 @@ export function ColumnView({
 
         {onCreate &&
           (composing ? (
-            <div className="rounded-xl border border-zinc-700 bg-[var(--color-surface-2)] p-2">
+            <div className="pk-rise rounded-[10px] border border-sky-400/30 bg-[var(--color-surface-2)] p-2.5 shadow-[var(--pk-shadow-lift)]">
               <textarea
                 autoFocus
                 rows={2}
@@ -132,27 +134,29 @@ export function ColumnView({
               <div className="mt-1.5 flex items-center gap-2">
                 <button
                   onClick={submit}
-                  className="rounded-md bg-sky-500 px-2.5 py-1 text-[11.5px] font-medium text-sky-950 hover:bg-sky-400"
+                  className="pk-press rounded-md bg-sky-400 px-2.5 py-1 text-[11.5px] font-semibold text-sky-950 hover:bg-sky-300"
                 >
                   Add card
                 </button>
-                <button onClick={() => setComposing(false)} className="text-[11.5px] text-zinc-500 hover:text-zinc-300">
+                <button onClick={() => setComposing(false)} className="rounded px-1 text-[11.5px] text-zinc-500 hover:text-zinc-300">
                   Cancel
                 </button>
+                <span className="ml-auto font-mono text-[10px] text-zinc-600">↵ to add</span>
               </div>
             </div>
           ) : (
             <button
               onClick={() => setComposing(true)}
-              className="rounded-xl border border-dashed border-zinc-800 py-2 text-[12px] text-zinc-600 transition hover:border-zinc-600 hover:text-zinc-300"
+              className="pk-press rounded-[10px] border border-dashed border-white/[0.08] py-2 text-[12px] text-zinc-500 hover:border-sky-400/40 hover:bg-sky-400/[0.04] hover:text-sky-200"
             >
               + Add a card
             </button>
           ))}
 
         {!tasks.length && !onCreate && (
-          <div className="rounded-xl border border-dashed border-zinc-900 py-6 text-center text-[11.5px] text-zinc-700">
-            empty
+          <div className="flex flex-col items-center gap-1.5 rounded-[10px] border border-dashed border-white/[0.06] px-4 py-7 text-center">
+            <span className={cx('size-1.5 rounded-full opacity-60', accent.dot)} />
+            <span className="text-[11.5px] text-zinc-600">Nothing here yet</span>
           </div>
         )}
       </div>

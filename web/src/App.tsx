@@ -321,18 +321,36 @@ export default function App() {
   };
 
   if (!snapshot) {
+    const reachable = connection === 'connecting';
     return (
-      <div className="flex h-full items-center justify-center text-sm text-zinc-600">
-        {connection === 'connecting' ? 'Connecting to the board…' : 'The board server is not reachable.'}
+      <div className="flex h-full flex-col">
+        <header className="pk-header flex items-center gap-3 px-5 py-3">
+          <img src="/favicon.svg" alt="" className="size-7" />
+          <span className="text-[14px] font-semibold tracking-[-0.01em] text-zinc-300">Ticketrail</span>
+          <span className="ml-3 text-[12px] text-zinc-500" role="status">
+            {reachable ? 'Connecting to the board…' : 'The board server is not reachable.'}
+          </span>
+        </header>
+        <div className="flex min-h-0 flex-1 gap-3 overflow-hidden px-5 py-4" aria-hidden="true">
+          {[5, 3, 2, 4, 1].map((cards, lane) => (
+            <div key={lane} className={cx('pk-lane flex w-[300px] shrink-0 flex-col gap-2 rounded-2xl p-3.5', !reachable && 'opacity-40')}>
+              <div className="pk-skeleton mb-3 h-3.5 w-24 rounded" />
+              {Array.from({ length: cards }, (_, i) => (
+                <div key={i} className={cx('h-[72px] rounded-[10px]', reachable && 'pk-skeleton')} style={{ opacity: 1 - i * 0.16 }} />
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex items-center gap-3 border-b border-[var(--color-line)] px-5 py-3">
-        <div className="flex items-center gap-2">
-          <img src="/favicon.svg" alt="Ticketrail" className="size-8" />
+      <header className="pk-header relative z-30 flex items-center gap-3 px-5 py-2.5">
+        <div className="flex items-center gap-2.5 pr-1">
+          <img src="/favicon.svg" alt="Ticketrail" className="size-7" />
+          <span className="hidden h-5 w-px bg-white/10 md:block" aria-hidden="true" />
         </div>
 
         <ProjectPicker
@@ -343,7 +361,8 @@ export default function App() {
         />
 
         {blocked > 0 && (
-          <span className="rounded-full bg-amber-400/10 px-2 py-0.5 text-[11px] font-medium text-amber-300">
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-amber-400/25 bg-amber-400/10 px-2 py-0.5 text-[11px] font-medium text-amber-200">
+            <span className="size-1.5 rounded-full bg-amber-400 pk-live" aria-hidden="true" />
             {blocked} waiting on you
           </span>
         )}
@@ -351,7 +370,7 @@ export default function App() {
         <div className="relative ml-auto w-full max-w-[280px] min-w-[140px]">
           <svg
             viewBox="0 0 16 16"
-            className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-zinc-600"
+            className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-zinc-500"
             fill="none"
             stroke="currentColor"
             strokeWidth="1.6"
@@ -374,8 +393,8 @@ export default function App() {
             aria-label="Search cards by title and description"
             title="Search titles and descriptions — press / to jump here"
             className={cx(
-              'w-full rounded-md border bg-black/30 py-1 pr-16 pl-8 text-[12px] text-zinc-100 outline-none transition placeholder:text-zinc-600 [&::-webkit-search-cancel-button]:hidden',
-              terms.length ? 'border-sky-700/70' : 'border-[var(--color-line)] focus:border-sky-600',
+              'w-full rounded-lg border bg-white/[0.035] py-1.5 pr-16 pl-8 text-[12.5px] text-zinc-100 outline-none transition placeholder:text-zinc-500 hover:bg-white/[0.05] focus:bg-white/[0.06] [&::-webkit-search-cancel-button]:hidden',
+              terms.length ? 'border-sky-400/50' : 'border-white/[0.07] focus:border-sky-400/60',
             )}
           />
           {terms.length > 0 ? (
@@ -397,33 +416,39 @@ export default function App() {
               </button>
             </span>
           ) : (
-            <kbd className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded border border-[var(--color-line)] px-1 font-mono text-[10px] text-zinc-600">
+            <kbd className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-[4px] border border-white/10 bg-white/[0.04] px-1.5 font-mono text-[10px] text-zinc-500">
               /
             </kbd>
           )}
         </div>
 
-        <div className="flex items-center gap-2 text-[11.5px] text-zinc-500">
+        <nav className="flex items-center gap-1 text-[12px] text-zinc-400" aria-label="Board tools">
           <button
             onClick={() => setSkillsOpen(true)}
-            className="rounded-md px-2 py-1 text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
+            aria-label={skillCount ? `Skills · ${skillCount}` : 'Skills'}
+            className="pk-press inline-flex items-center rounded-lg px-2.5 py-1.5 font-medium hover:bg-white/[0.06] hover:text-zinc-100"
             title="This project's Claude skills (.claude/skills)"
           >
-            Skills{skillCount ? ` · ${skillCount}` : ''}
+            Skills
+            {skillCount ? <span className="pk-num ml-1.5 rounded bg-white/[0.06] px-1 font-mono text-[10px] text-zinc-400">{skillCount}</span> : null}
           </button>
           <button
             onClick={() => setAgentsOpen(true)}
-            className="rounded-md px-2 py-1 text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
+            aria-label={agents.length ? `Agents · ${agents.length}` : 'Agents'}
+            className="pk-press inline-flex items-center rounded-lg px-2.5 py-1.5 font-medium hover:bg-white/[0.06] hover:text-zinc-100"
             title="This project's Claude agents (.claude/agents); assign one to a card"
           >
-            Agents{agents.length ? ` · ${agents.length}` : ''}
+            Agents
+            {agents.length ? <span className="pk-num ml-1.5 rounded bg-white/[0.06] px-1 font-mono text-[10px] text-zinc-400">{agents.length}</span> : null}
           </button>
           <button
             onClick={() => setFoldersOpen(true)}
-            className="rounded-md px-2 py-1 text-zinc-500 transition hover:bg-white/5 hover:text-zinc-200"
+            aria-label={folders.length ? `Folders · ${folders.length}` : 'Folders'}
+            className="pk-press inline-flex items-center rounded-lg px-2.5 py-1.5 font-medium hover:bg-white/[0.06] hover:text-zinc-100"
             title="Optional folders that group cards in every lane"
           >
-            Folders{folders.length ? ` · ${folders.length}` : ''}
+            Folders
+            {folders.length ? <span className="pk-num ml-1.5 rounded bg-white/[0.06] px-1 font-mono text-[10px] text-zinc-400">{folders.length}</span> : null}
           </button>
           <Settings
             confirmLinks={confirmLinks}
@@ -443,12 +468,12 @@ export default function App() {
             tasks={snapshot?.tasks ?? []}
             onOpenCard={setOpenId}
           />
-        </div>
+        </nav>
       </header>
 
       {allLabels.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--color-line)] px-5 py-2">
-          <span className="mr-1 text-[10.5px] tracking-wide text-zinc-600 uppercase">Labels</span>
+        <div className="flex flex-wrap items-center gap-1.5 px-5 pt-3">
+          <span className="mr-1 text-[11px] font-medium text-zinc-500">Filter by label</span>
           {allLabels.map((label) => {
             const on = labelFilter?.toLowerCase() === label.toLowerCase();
             return (
@@ -456,9 +481,9 @@ export default function App() {
                 key={label}
                 onClick={() => setLabelFilter(on ? null : label)}
                 className={cx(
-                  'rounded px-1.5 py-0.5 text-[11px] font-medium transition',
+                  'pk-press rounded-md px-2 py-0.5 text-[11px] font-medium',
                   labelTone(label),
-                  on ? 'ring-1 ring-zinc-400' : 'opacity-60 hover:opacity-100',
+                  on ? 'ring-1 ring-current' : 'opacity-55 hover:opacity-100',
                 )}
               >
                 {label}
@@ -466,18 +491,22 @@ export default function App() {
             );
           })}
           {labelFilter && (
-            <button onClick={() => setLabelFilter(null)} className="ml-1 text-[11px] text-zinc-500 hover:text-zinc-300">
-              clear
+            <button onClick={() => setLabelFilter(null)} className="ml-1 rounded px-1 text-[11px] text-zinc-500 underline-offset-2 hover:text-zinc-200 hover:underline">
+              Clear filter
             </button>
           )}
         </div>
       )}
 
       {error && (
-        <div className="flex items-center gap-3 border-b border-red-900/50 bg-red-950/40 px-5 py-2 text-[12px] text-red-200">
+        <div className="mx-5 mt-3 flex items-center gap-3 rounded-lg border border-red-400/25 bg-red-500/10 px-3.5 py-2 text-[12px] text-red-100" role="alert">
+          <svg viewBox="0 0 16 16" className="size-3.5 shrink-0 text-red-300" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+            <circle cx="8" cy="8" r="6" />
+            <path d="M8 5v3.5M8 11h.01" strokeLinecap="round" />
+          </svg>
           {error}
-          <button onClick={dismissError} className="ml-auto text-red-300 hover:text-red-100">
-            dismiss
+          <button onClick={dismissError} className="ml-auto rounded px-1.5 py-0.5 text-red-200 hover:bg-red-400/10 hover:text-red-50">
+            Dismiss
           </button>
         </div>
       )}
@@ -496,7 +525,7 @@ export default function App() {
           pause(false);
         }}
       >
-        <main className="flex min-h-0 flex-1 gap-4 overflow-x-auto px-5 py-4">
+        <main className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-5 pt-3 pb-4">
           {snapshot.columns.map((meta) => (
             <ColumnView
               key={meta.id}

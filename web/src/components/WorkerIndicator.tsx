@@ -71,7 +71,7 @@ export function WorkerIndicator({
         <div
           role="dialog"
           aria-label="Workers on this board"
-          className="absolute top-full right-0 z-50 mt-1.5 w-[300px] rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-1)] p-3 text-[11.5px] shadow-2xl shadow-black/60"
+          className="absolute top-full right-0 z-50 mt-1.5 w-[300px] rounded-xl border border-white/[0.08] bg-[var(--color-surface-2)] p-3 text-[11.5px] pk-panel"
         >
           <h3 className="mb-1.5 text-[10.5px] font-semibold tracking-wide text-zinc-500 uppercase">Working</h3>
           {running.length ? (

@@ -167,7 +167,7 @@ describe('folder groups in a lane', () => {
     unmount();
     render(<Lane tasks={tasks} folders={folders} />);
     expect(screen.queryByText('Rotate tokens')).toBeNull();
-    fireEvent.click(screen.getByText('expand all'));
+    fireEvent.click(screen.getByText('Expand all'));
     expect(screen.getByText('Rotate tokens')).toBeTruthy();
   });
 
@@ -175,6 +175,6 @@ describe('folder groups in a lane', () => {
     store.create({ title: 'Just a card', column: 'implement' });
     render(<Lane tasks={store.list()} folders={[]} />);
     expect(screen.getByText('Just a card')).toBeTruthy();
-    expect(screen.queryByText('collapse all')).toBeNull();
+    expect(screen.queryByText('Collapse all')).toBeNull();
   });
 });

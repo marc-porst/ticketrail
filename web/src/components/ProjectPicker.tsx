@@ -60,7 +60,7 @@ export function ProjectPicker({
       {open && (
         <div
           role="listbox"
-          className="absolute top-full left-0 z-50 mt-1.5 w-[380px] overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] shadow-2xl shadow-black/60"
+          className="absolute top-full left-0 z-50 mt-1.5 w-[380px] overflow-hidden rounded-xl border border-white/[0.08] bg-[var(--color-surface-2)] pk-panel"
         >
           <ul className="max-h-[60vh] overflow-y-auto py-1">
             {projects.map((project) => {

@@ -34,9 +34,9 @@ export function LinkConfirm({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Link cards">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-[2px]" onClick={onCancel} />
+      <div className="pk-scrim absolute inset-0" onClick={onCancel} />
       <form
-        className="relative w-full max-w-[440px] rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-1)] p-5 shadow-2xl shadow-black/60"
+        className="relative w-full max-w-[440px] rounded-2xl border border-white/[0.07] bg-[var(--color-surface-1)] p-5 pk-panel"
         onSubmit={(e) => {
           e.preventDefault();
           onConfirm(dontAsk);

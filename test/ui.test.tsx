@@ -731,7 +731,7 @@ describe('board UI', () => {
     await waitFor(() => expect(screen.queryByText('Write the onboarding email copy')).toBeNull());
     expect(screen.getByText('Fix the flickering avatar')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'clear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
     await waitFor(() => expect(screen.getByText('Write the onboarding email copy')).toBeTruthy());
   });
 

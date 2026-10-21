@@ -7,15 +7,20 @@ export interface Accent {
   soft: string;
 }
 
-/** One accent per column, used for the header rule, the count pill and card cues. */
+/**
+ * One accent per column, used for the lane rail, the count and card cues. Only
+ * the lanes that mean something get a hue: planning is indigo, "needs you" is
+ * amber, the hand-off to Claude is the app accent, live work is emerald.
+ * Everything else stays neutral so the board does not read as a rainbow.
+ */
 export const ACCENT: Record<Column, Accent> = {
-  backlog: { dot: 'bg-slate-400', text: 'text-slate-300', bar: 'bg-slate-500/60', soft: 'bg-slate-400/10' },
-  plan: { dot: 'bg-violet-400', text: 'text-violet-300', bar: 'bg-violet-500/70', soft: 'bg-violet-400/10' },
-  'user-input': { dot: 'bg-amber-400', text: 'text-amber-300', bar: 'bg-amber-500/70', soft: 'bg-amber-400/10' },
-  implement: { dot: 'bg-sky-400', text: 'text-sky-300', bar: 'bg-sky-500/70', soft: 'bg-sky-400/10' },
-  'in-progress': { dot: 'bg-emerald-400', text: 'text-emerald-300', bar: 'bg-emerald-500/70', soft: 'bg-emerald-400/10' },
-  planned: { dot: 'bg-indigo-400', text: 'text-indigo-300', bar: 'bg-indigo-500/70', soft: 'bg-indigo-400/10' },
-  done: { dot: 'bg-zinc-500', text: 'text-zinc-400', bar: 'bg-zinc-600/70', soft: 'bg-zinc-500/10' },
+  backlog: { dot: 'bg-zinc-500', text: 'text-zinc-400', bar: 'bg-zinc-600/60', soft: 'bg-white/[0.05]' },
+  plan: { dot: 'bg-indigo-300', text: 'text-indigo-200', bar: 'bg-indigo-400/60', soft: 'bg-indigo-400/10' },
+  'user-input': { dot: 'bg-amber-400', text: 'text-amber-300', bar: 'bg-amber-400/70', soft: 'bg-amber-400/10' },
+  implement: { dot: 'bg-sky-400', text: 'text-sky-300', bar: 'bg-sky-400/70', soft: 'bg-sky-400/10' },
+  'in-progress': { dot: 'bg-emerald-400', text: 'text-emerald-300', bar: 'bg-emerald-400/70', soft: 'bg-emerald-400/10' },
+  planned: { dot: 'bg-indigo-300', text: 'text-indigo-200', bar: 'bg-indigo-400/40', soft: 'bg-indigo-400/10' },
+  done: { dot: 'bg-zinc-600', text: 'text-zinc-500', bar: 'bg-zinc-700/70', soft: 'bg-white/[0.04]' },
 };
 
 /**
