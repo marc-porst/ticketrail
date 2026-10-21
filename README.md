@@ -172,8 +172,7 @@ cd ticketrail
 </p>
 
 The script sets everything up (the very first start takes a minute longer) and then **opens the
-board in your browser by itself**, at **http://localhost:5173**. Its messages are in German:
-*„Starte …"* means *"starting …"* and *„Öffne"* means *"opening"*.
+board in your browser by itself**, at **http://localhost:5173**.
 
 > ⚠️ **Leave this Terminal window open** while you use the board. Closing it, or pressing
 > <kbd>Ctrl</kbd>+<kbd>C</kbd> in it, switches the board off. To start again, run `./start.sh`.
@@ -310,7 +309,7 @@ and the result lands in *Done* like any other card.
 > you start it. Until then it still follows the agent's instructions, so nothing is lost. Choose
 > **None** in the Agent box to let Claude do a card itself again.
 
-### Several Claudes at once: named workers 👯
+### Several Claudes at once: named workers 🤖
 
 One Claude works one card at a time. Want more done in parallel? Start **several** Claude
 windows for the same space and give each one a **name** and a **job**.
