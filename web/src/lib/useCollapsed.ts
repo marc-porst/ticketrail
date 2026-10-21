@@ -62,7 +62,21 @@ export function useCollapsed(projectId: string | null) {
     [collapsed, save],
   );
 
-  return { isCollapsed, toggle, setAll };
+  // A whole lane folds to a narrow rail. Its entry is the bare column id, which
+  // never collides with a "column:folder" entry.
+  const isLaneFolded = useCallback((column: Column) => collapsed.has(column), [collapsed]);
+
+  const toggleLane = useCallback(
+    (column: Column) => {
+      const next = new Set(collapsed);
+      if (next.has(column)) next.delete(column);
+      else next.add(column);
+      save(next);
+    },
+    [collapsed, save],
+  );
+
+  return { isCollapsed, toggle, setAll, isLaneFolded, toggleLane };
 }
 
 export type Collapsed = ReturnType<typeof useCollapsed>;

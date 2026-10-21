@@ -6,16 +6,49 @@ export function CardFace({
   task,
   dragging,
   referencedBy = 0,
+  compact = false,
 }: {
   task: Task;
   dragging?: boolean;
   /** How many other cards link this one as related. */
   referencedBy?: number;
+  /** One row per card: title, number and the cues that need you. */
+  compact?: boolean;
 }) {
   const accent = ACCENT[task.column];
   const waiting = pendingQuestion(task);
   const live = task.column === 'in-progress';
   const lastActivity = task.activity[task.activity.length - 1];
+
+  if (compact) {
+    return (
+      <div
+        className={cx(
+          'pk-card relative overflow-hidden rounded-lg border px-2.5 py-1.5 text-left',
+          waiting ? 'border-amber-400/40' : live ? 'border-emerald-400/25' : 'border-white/[0.06]',
+          dragging ? 'pk-card-dragging rotate-[1.5deg] scale-[1.02]' : 'hover:border-white/[0.12]',
+        )}
+        title={waiting ? `${task.title}\n\nWaiting on you: ${waiting.text}` : task.title}
+      >
+        {(live || waiting) && (
+          <span
+            aria-hidden="true"
+            className={cx('absolute inset-y-1.5 left-0 w-[2px] rounded-r-full', waiting ? 'bg-amber-400' : 'bg-emerald-400')}
+          />
+        )}
+        <div className="flex items-center gap-2">
+          {live && <span className={cx('pk-ping size-1.5 shrink-0 rounded-full', accent.dot)} />}
+          {waiting && <span className="size-1.5 shrink-0 rounded-full bg-amber-400 pk-live" aria-label="Waiting on you" />}
+          <p className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-zinc-100">{task.title}</p>
+          {task.labels.slice(0, 3).map((label) => (
+            <span key={label} className={cx('size-1.5 shrink-0 rounded-full bg-current', labelTone(label).split(' ')[1])} title={label} />
+          ))}
+          <span className="shrink-0 font-mono text-[10px] text-zinc-600">#{task.number}</span>
+        </div>
+        {waiting && <p className="mt-1 truncate text-[11px] text-amber-100/80">{waiting.text}</p>}
+      </div>
+    );
+  }
 
   return (
     <div
@@ -34,7 +67,9 @@ export function CardFace({
       )}
       <div className="flex items-start gap-2">
         {live && <span className={cx('pk-ping mt-[7px] size-1.5 shrink-0 rounded-full', accent.dot)} />}
-        <p className="flex-1 text-[13.5px] leading-[1.4] font-medium tracking-[-0.005em] text-zinc-100">{task.title}</p>
+        <p className="line-clamp-3 flex-1 text-[13.5px] leading-[1.4] font-medium tracking-[-0.005em] text-zinc-100" title={task.title}>
+          {task.title}
+        </p>
         {!live && task.worker && (
           <span className="mt-0.5 shrink-0 rounded-[4px] bg-sky-400/10 px-1.5 py-px font-mono text-[10px] text-sky-300/80" title={`Only worker ${task.worker} takes this card`}>
             → {task.worker}
@@ -140,6 +175,7 @@ export function Card({
   insertBefore,
   linkTarget = false,
   referencedBy,
+  compact = false,
 }: {
   task: Task;
   onOpen: (task: Task) => void;
@@ -147,6 +183,7 @@ export function Card({
   /** A dragged card is over this card's link zone. */
   linkTarget?: boolean;
   referencedBy?: number;
+  compact?: boolean;
 }) {
   const draggable = useDraggable({ id: `card:${task.id}`, data: { taskId: task.id } });
   const droppable = useDroppable({ id: `card:${task.id}`, data: { taskId: task.id } });
@@ -155,7 +192,7 @@ export function Card({
     <div ref={droppable.setNodeRef} className="pk-rise relative">
       {insertBefore && <div className="absolute -top-1 right-0 left-0 h-0.5 rounded-full bg-sky-400" />}
       {linkTarget && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-end justify-center rounded-[10px] bg-sky-500/10 pb-1.5 outline-2 outline-sky-400 outline-dashed">
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-end justify-center rounded-[10px] bg-sky-500/10 pb-1 outline-2 outline-sky-400 outline-dashed">
           <span className="rounded-full bg-sky-500/90 px-2 py-0.5 text-[10.5px] font-semibold text-white shadow">
             Link as related
           </span>
@@ -168,7 +205,7 @@ export function Card({
         onClick={() => onOpen(task)}
         className={cx('block w-full cursor-grab touch-none rounded-[10px] active:cursor-grabbing', draggable.isDragging && 'opacity-30')}
       >
-        <CardFace task={task} referencedBy={referencedBy} />
+        <CardFace task={task} referencedBy={referencedBy} compact={compact} />
       </button>
     </div>
   );

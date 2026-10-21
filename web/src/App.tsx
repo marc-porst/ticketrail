@@ -24,6 +24,7 @@ import { setConfirmLink, shouldConfirmLink } from './lib/confirmLink.ts';
 import { SpacesModal } from './components/SpacesModal.tsx';
 import { FoldersModal } from './components/FoldersModal.tsx';
 import { useCollapsed } from './lib/useCollapsed.ts';
+import { DONE_VISIBLE, useDensity } from './lib/useDensity.ts';
 import { CHANGE_TEXT, type ChangeKind } from './lib/changes.ts';
 import { playCue, primeAudio } from './lib/sound.ts';
 import { showNotification } from './lib/notify.ts';
@@ -121,6 +122,8 @@ export default function App() {
     };
   }, [api]);
   const collapsed = useCollapsed(selected);
+  const [density, setDensity] = useDensity();
+  const compact = density === 'compact';
   const [overCardId, setOverCardId] = useState<string | null>(null);
   const [overZone, setOverZone] = useState<DropZone>('before');
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
@@ -333,7 +336,7 @@ export default function App() {
         </header>
         <div className="flex min-h-0 flex-1 gap-3 overflow-hidden px-5 py-4" aria-hidden="true">
           {[5, 3, 2, 4, 1].map((cards, lane) => (
-            <div key={lane} className={cx('pk-lane flex w-[300px] shrink-0 flex-col gap-2 rounded-2xl p-3.5', !reachable && 'opacity-40')}>
+            <div key={lane} className={cx('pk-lane flex min-w-[208px] max-w-[380px] flex-1 basis-0 flex-col gap-2 rounded-2xl p-3.5', !reachable && 'opacity-40')}>
               <div className="pk-skeleton mb-3 h-3.5 w-24 rounded" />
               {Array.from({ length: cards }, (_, i) => (
                 <div key={i} className={cx('h-[72px] rounded-[10px]', reachable && 'pk-skeleton')} style={{ opacity: 1 - i * 0.16 }} />
@@ -450,6 +453,30 @@ export default function App() {
             Folders
             {folders.length ? <span className="pk-num ml-1.5 rounded bg-white/[0.06] px-1 font-mono text-[10px] text-zinc-400">{folders.length}</span> : null}
           </button>
+          <div className="mx-1 flex items-center rounded-lg bg-white/[0.04] p-0.5" role="group" aria-label="Card density">
+            {(
+              [
+                ['comfortable', 'Comfortable cards: title, labels and details', 'M2.5 3h11v4h-11zM2.5 9h11v4h-11z'],
+                ['compact', 'Compact cards: one row each, fits long lanes on screen', 'M2.5 3h11M2.5 6.3h11M2.5 9.7h11M2.5 13h11'],
+              ] as const
+            ).map(([value, label, d]) => (
+              <button
+                key={value}
+                onClick={() => setDensity(value)}
+                aria-pressed={density === value}
+                aria-label={label}
+                title={label}
+                className={cx(
+                  'pk-press rounded-md p-1.5',
+                  density === value ? 'bg-white/[0.09] text-zinc-100' : 'text-zinc-500 hover:text-zinc-200',
+                )}
+              >
+                <svg viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+                  <path d={d} strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            ))}
+          </div>
           <Settings
             confirmLinks={confirmLinks}
             onConfirmLinksChange={(on) => {
@@ -538,6 +565,9 @@ export default function App() {
               folders={folders}
               collapsed={collapsed}
               overFolderId={overFolder?.column === meta.id ? overFolder.above : null}
+              compact={compact}
+              // finished work piles up: fold all but the latest, unless a search or filter is narrowing the board
+              limit={meta.id === 'done' && !terms.length && !labelFilter ? DONE_VISIBLE : undefined}
               onOpen={(task) => setOpenId(task.id)}
               onCreate={
                 meta.id === 'backlog'
@@ -550,7 +580,7 @@ export default function App() {
 
         <DragOverlay dropAnimation={null}>
           {active ? (
-            <CardFace task={active} dragging />
+            <CardFace task={active} dragging compact={compact} />
           ) : activeFolder && folders.find((f) => f.id === activeFolder) ? (
             <FolderDragFace folder={folders.find((f) => f.id === activeFolder)!} />
           ) : null}

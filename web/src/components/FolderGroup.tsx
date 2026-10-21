@@ -16,6 +16,7 @@ export function FolderGroup({
   collapsed,
   onToggle,
   insertBefore = false,
+  compact = false,
   children,
 }: {
   folder: Folder;
@@ -25,6 +26,8 @@ export function FolderGroup({
   onToggle: () => void;
   /** Another folder is being dragged over this one and would land above it. */
   insertBefore?: boolean;
+  /** Tighter spacing to match one-row cards. */
+  compact?: boolean;
   children: ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: folderDropId(column, folder.id), data: { folder: folder.id, column } });
@@ -37,7 +40,7 @@ export function FolderGroup({
 
   return (
     // only the header is a drop target: the cards inside keep their own reorder and link zones
-    <div className={cx('relative flex flex-col gap-2', drag.isDragging && 'opacity-30')}>
+    <div className={cx('relative flex flex-col', compact ? 'gap-1' : 'gap-2', drag.isDragging && 'opacity-30')}>
       {insertBefore && <div className="absolute -top-1 right-0 left-0 h-0.5 rounded-full bg-sky-400" />}
       <button
         ref={mergeRefs(setNodeRef, drag.setNodeRef)}
@@ -71,7 +74,7 @@ export function FolderGroup({
           </span>
         )}
       </button>
-      {!collapsed && <div className={cx('ml-1.5 flex flex-col gap-2 border-l-2 pl-2', tone.rail)}>{children}</div>}
+      {!collapsed && <div className={cx('ml-1.5 flex flex-col border-l-2 pl-2', compact ? 'gap-1' : 'gap-2', tone.rail)}>{children}</div>}
     </div>
   );
 }
