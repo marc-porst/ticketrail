@@ -147,19 +147,40 @@ it was checked.
 Not quite right? Write what's missing in the **Chat** and drag the card back to **Implement**.
 The earlier result is kept further down, so nothing gets lost.
 
+### Cards that belong together 🔗
+
+Some cards only make sense next to another one: a bug in a feature you finished last week, or the
+second half of a split-up job. **Drop one card onto another** (on its lower half, where it says
+*Link as related*) and the card you dropped it on will *read* the other one. When Claude works
+that card, it also gets the other card's description, plan and result as background, so it knows
+what was decided before.
+
+To see all of that at once, click **Relations** in the top bar. Every card appears on a map, with
+an arrow from each card to the cards it reads. Hover a card to light up its links.
+
+<p align="center">
+  <img src="docs/images/guide-relations.png" alt="The Relations map: cards as boxes with arrows between them; the hovered card's two links are lit up" width="640">
+</p>
+
+On the map you can:
+
+- **Link** two cards: hover a card and drag from the blue dot on its right onto another card.
+- **Unlink** them: hover an arrow and click the little trash button that appears on it.
+- **Make a new card**: **+ New card**, double-click an empty spot, or drop a link on empty space
+  to get a new card that is already linked.
+- **Open** a card: click it, and it opens on the right while the map stays.
+- **Tidy up**: arrange everything neatly so it fits the window.
+
 ### Handy extras 🎁
 
 - 🔎 **Search:** press <kbd>/</kbd> and type a word to find any card.
 - 🗑️ **Delete a card:** **Delete card** at the bottom of a card. It asks first, because deleting
-  can't be undone; tick *Don't show this again* to skip the question (switch it back on in
-  Settings ⚙️ → Board).
+  can't be undone, and tells you which cards will lose their link to it. Tick *Don't show this
+  again* to skip the question (switch it back on in Settings ⚙️ → Board).
 - 📁 **Folders:** group cards by topic ("Shopping list", "Recipes"). Optional, purely for tidiness.
 - 🏷️ **Labels:** little coloured tags such as `design` or `mobile`. Click one at the top to show
   only those cards.
-- 🔗 **Related cards:** drop a card onto another card to say "read this one too". Handy for a bug
-  that belongs to an earlier feature. **Relations** at the top shows every card and the arrows
-  between them; draw a line from one card to another to link them, and press **Tidy up** to
-  sort the picture.
+- 🔗 **Related cards:** see [Cards that belong together](#cards-that-belong-together-) just above.
 - 🖥️ **Session:** every card keeps what Claude did on it, step by step, run by run. Open the
   card's **Session** tab to watch live or look back later.
 - 🔔 **Alerts:** the ⚙️ menu can play a sound or show a notification when a card moves, so you
@@ -381,6 +402,14 @@ are never touched. A card in <i>Plan</i> never changes anything, it only produce
 </details>
 
 <details>
+<summary><b>I deleted a card by mistake. Can I get it back?</b></summary>
+
+Not from the board: deleting is final, which is why it asks first. If your project uses git and
+the card was committed, its file can be restored from there (it lives in
+<code>.ticketrail/tasks/</code>). Its links from other cards would have to be added again.
+</details>
+
+<details>
 <summary><b>I dragged a card by mistake. Now what?</b></summary>
 
 Drag it back. If Claude already started, dragging it out of <i>In Progress</i> tells Claude to stop.
@@ -598,6 +627,12 @@ and does not have to work out what "see #12" means. Links are one level deep and
 linked card shows the link under **Referenced by**, but Claude only gets context from the card it
 is working on.
 
+Put the link on the card that **needs** the context, usually the newer one: the follow-up bug links
+the original feature, not the other way round. Each linked card can add up to about 24,000
+characters (description, plan and result, 8,000 each) to what Claude reads for that card, so link
+for a reason, not just because two cards are similar. Cards that are not linked are never shown to
+Claude. Deleting a card removes every link to it (see [Deleting a card](#deleting-a-card)).
+
 ```bash
 ticketrail relate <id> #12 #14     # link, by id or #number
 ticketrail unrelate <id> #12       # unlink
@@ -633,6 +668,26 @@ investigation it was derived from.
 
 Hovering a card highlights its links and dims the rest. Where the cards sit is remembered in this
 browser only, per project; the links themselves are stored on the cards like any other.
+
+## Deleting a card
+
+**Delete card** at the bottom of a card's drawer (or of the panel in the Relations view) removes
+the card for good:
+
+- its file in `.ticketrail/tasks/`, its attachments in `.ticketrail/files/` and its saved
+  sessions in `.ticketrail/sessions/`;
+- every link to it: it leaves every other card's `related` list, and implementation cards made from
+  it lose their `derivedFrom`. Each card that lost a link gets "Unlinked #n (the card was deleted)."
+  in its activity, and keeps its other links.
+
+A dialog asks first. It names the card, says it cannot be undone and lists which cards will lose
+their link. **Cancel** has the focus. *Don't show this again* turns the dialog off in this browser;
+**Settings ⚙️ → Board → Ask before deleting a card** turns it back on. A card that is In Progress
+cannot be deleted (the worker would write it straight back); move it out first. The API call is
+`DELETE /api/projects/<project>/tasks/<id>`; there is no CLI command, so a worker never deletes cards.
+
+Cards no longer get archived. Boards from before this change may still have card files marked
+`"archived": true`; those stay hidden and can be deleted the same way.
 
 ## Folders
 
@@ -888,12 +943,8 @@ the plan, the activity feed, the chat, and the ids of any attached files (the by
 them in `.ticketrail/files/`). One file per card rather than one big array: two
 independent writers on a single file lose updates, and per-card files give clean git diffs.
 
-**Deleting a card** removes its file, its attachments in `.ticketrail/files/` and its saved
-sessions, and takes it out of every other card's `related` list (and `derivedFrom`), noting
-"Unlinked #n (the card was deleted)" in each of those cards' activity. It is refused while the
-card is In Progress, because the worker would only write it back. (Older boards may still
-have cards marked `"archived": true` from before deleting existed; they stay hidden and can be
-deleted the same way.)
+Deleting a card removes its file, its attachments and its saved sessions together, under the same
+lock, after removing every link to it; see [Deleting a card](#deleting-a-card).
 
 Every write goes through a `mkdir`-based lock and lands via `rename`, so the board stays
 consistent when Claude and the browser act at the same moment. `next` claims a card under
