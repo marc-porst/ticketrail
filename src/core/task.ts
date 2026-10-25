@@ -146,6 +146,41 @@ export interface Attachment {
   addedBy: Role;
 }
 
+/**
+ * Where a run's terminal output lives: a byte range of the Claude Code
+ * transcript the worker was writing while it held the card.
+ */
+export interface TaskSession {
+  /** CLAUDE_CODE_SESSION_ID of the worker. */
+  id: string;
+  /** Absolute path of that session's transcript (.jsonl). */
+  transcript: string;
+  /** Byte offset where this run began. */
+  from: number;
+  /** Byte offset where it stopped; null while it is still running. */
+  to: number | null;
+  /** Names this run's saved copy in .ticketrail/sessions/<task>/<run>.json. */
+  run: string;
+  /** When the run was claimed. */
+  startedAt: string | null;
+  /** Its entries were copied out of the transcript when it ended, so it outlives it. */
+  saved: boolean;
+}
+
+/** A run whose session a later run replaced. Its entries live in the saved copy. */
+export interface PastSession {
+  run: string;
+  startedAt: string | null;
+  endedAt: string;
+  mode: Mode | null;
+}
+
+/** Oldest past sessions, and their saved copies, are dropped beyond this many. */
+export const MAX_SESSION_HISTORY = 20;
+
+/** What a run id may look like; it becomes a file name. */
+export const RUN_ID = /^[A-Za-z0-9_-]{1,40}$/;
+
 export interface Task {
   id: string;
   number: number;
@@ -169,6 +204,10 @@ export interface Task {
   claimedBy: string | null;
   /** Model of the most recent run on this card, used to notice a change. */
   model: string | null;
+  /** The most recent run's slice of the worker's transcript, or null when none was recorded. */
+  session: TaskSession | null;
+  /** Earlier runs' sessions, oldest first. */
+  sessionHistory: PastSession[];
   mode: Mode | null;
   returnColumn: Column | null;
   plan: string | null;
@@ -225,6 +264,18 @@ export function normalizeTask(raw: any, fallbackId: string): Task {
     worker: isWorkerName(raw?.worker) ? raw.worker : null,
     claimedBy: typeof raw?.claimedBy === 'string' && raw.claimedBy ? raw.claimedBy : null,
     model: typeof raw?.model === 'string' && raw.model ? raw.model : null,
+    session: normalizeSession(raw?.session),
+    sessionHistory: Array.isArray(raw?.sessionHistory)
+      ? raw.sessionHistory
+          .filter((r: any) => typeof r?.run === 'string' && RUN_ID.test(r.run))
+          .map((r: any) => ({
+            run: r.run,
+            startedAt: typeof r?.startedAt === 'string' ? r.startedAt : null,
+            endedAt: typeof r?.endedAt === 'string' ? r.endedAt : created,
+            mode: r?.mode === 'plan' || r?.mode === 'implement' ? r.mode : null,
+          }))
+          .slice(-MAX_SESSION_HISTORY)
+      : [],
     mode: raw?.mode === 'plan' || raw?.mode === 'implement' ? raw.mode : null,
     returnColumn: isColumn(raw?.returnColumn) ? raw.returnColumn : null,
     plan: typeof raw?.plan === 'string' ? raw.plan : null,
@@ -272,6 +323,27 @@ export function normalizeTask(raw: any, fallbackId: string): Task {
     finishedAt: typeof raw?.finishedAt === 'string' ? raw.finishedAt : null,
     cancelRequested: raw?.cancelRequested === true,
     archived: raw?.archived === true,
+  };
+}
+
+function isOffset(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+function normalizeSession(raw: any): TaskSession | null {
+  if (typeof raw?.id !== 'string' || !raw.id) return null;
+  if (typeof raw?.transcript !== 'string' || !raw.transcript) return null;
+  if (!isOffset(raw?.from)) return null;
+  const to = isOffset(raw?.to) && raw.to >= raw.from ? raw.to : null;
+  return {
+    id: raw.id,
+    transcript: raw.transcript,
+    from: raw.from,
+    to,
+    // sessions recorded before runs were saved get a stable id of their own
+    run: typeof raw?.run === 'string' && RUN_ID.test(raw.run) ? raw.run : `r${raw.from}`,
+    startedAt: typeof raw?.startedAt === 'string' ? raw.startedAt : null,
+    saved: raw?.saved === true,
   };
 }
 

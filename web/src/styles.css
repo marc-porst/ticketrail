@@ -381,3 +381,11 @@ button {
     transform: none;
   }
 }
+
+/* The card's tab strip scrolls sideways on a narrow drawer, without a bar over the underline */
+.pk-tabs {
+  scrollbar-width: none;
+}
+.pk-tabs::-webkit-scrollbar {
+  display: none;
+}

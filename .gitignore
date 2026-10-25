@@ -9,6 +9,7 @@ node_modules/
 .ticketrail/tasks/*
 !.ticketrail/tasks/t_mvdxqulki5dz.json
 .ticketrail/files/
+.ticketrail/sessions/
 .ticketrail/folders.json
 # Boards from before the rename to Ticketrail
 .promptkanban/

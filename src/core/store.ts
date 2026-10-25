@@ -4,7 +4,8 @@ import { pathsFor, type Paths } from './paths.ts';
 import { withLock } from './lock.ts';
 import { orderBetween, orderFirst, orderLast } from './order.ts';
 import { displayName, safeExtension } from './files.ts';
-import { modelLabel } from './model.ts';
+import { claudeHome, modelLabel } from './model.ts';
+import { SessionReader, isTranscriptPath, lastEntries, type SessionEntry } from './transcript.ts';
 import { isSkillName } from './skill-rules.ts';
 import {
   type Folder,
@@ -20,6 +21,8 @@ import {
   COLUMN_LABELS,
   COLUMNS,
   MAX_RESULT_HISTORY,
+  MAX_SESSION_HISTORY,
+  RUN_ID,
   QUEUE_COLUMNS,
   isReadOnlyType,
   makeId,
@@ -34,6 +37,7 @@ import {
   type Column,
   type Message,
   type Mode,
+  type PastSession,
   type Task,
   type TaskType,
   TYPE_LABELS,
@@ -54,6 +58,10 @@ export interface BoardConfig {
   notifications: NotificationSettings;
   /** Note which model Claude was running on each status change. */
   recordModel: boolean;
+  /** Record where in the worker's Claude Code transcript each run lives, for the Session tab. */
+  liveSession: boolean;
+  /** Save a copy of each run's session in .ticketrail/sessions/ when it ends. */
+  keepSessions: boolean;
 }
 
 export const DEFAULT_CONFIG: BoardConfig = {
@@ -62,6 +70,8 @@ export const DEFAULT_CONFIG: BoardConfig = {
   title: 'Ticketrail',
   notifications: { sound: true, desktop: true, onStart: false },
   recordModel: true,
+  liveSession: true,
+  keepSessions: true,
 };
 
 /**
@@ -90,6 +100,30 @@ function writeJsonAtomic(file: string, data: unknown): void {
   fs.renameSync(tmp, file);
 }
 
+/** Bytes in a file right now, or null when it cannot be read. */
+function sizeOf(file: string): number | null {
+  try {
+    return fs.statSync(file).size;
+  } catch {
+    return null;
+  }
+}
+
+/** A run's session as saved when it ended: everything the Session tab needs, without the transcript. */
+export interface SavedSession {
+  run: string;
+  startedAt: string | null;
+  endedAt: string;
+  mode: Mode | null;
+  model: string | null;
+  /** The run was longer than what was kept; its start is missing. */
+  clipped: boolean;
+  entries: SessionEntry[];
+}
+
+/** The most entries a saved run keeps: the last ones. Output in each is already cut short. */
+export const MAX_SAVED_ENTRIES = 2000;
+
 function readJson<T>(file: string): T | null {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8')) as T;
@@ -110,10 +144,113 @@ export class Store {
    */
   model: string | null;
 
-  constructor(root: string, options: { model?: string | null } = {}) {
+  /**
+   * The Claude Code session this process runs in, so a claim can note where
+   * in its transcript the run begins. Set by the CLI, like `model`.
+   */
+  session: { id: string; transcript: string } | null;
+
+  constructor(
+    root: string,
+    options: { model?: string | null; session?: { id: string; transcript: string } | null } = {},
+  ) {
     this.root = root;
     this.paths = pathsFor(root);
     this.model = options.model ?? null;
+    this.session = options.session ?? null;
+  }
+
+  /**
+   * Close the running slice of the transcript, and copy its entries into
+   * .ticketrail/sessions/ so the run can still be read once Claude Code has
+   * cleaned the transcript up. Saving is best effort: a run that could not be
+   * saved is still readable from the transcript while that exists.
+   */
+  private endSession(task: Task): void {
+    const session = task.session;
+    if (!session) return;
+    if (session.to === null) {
+      const size = sizeOf(session.transcript);
+      session.to = size === null ? session.from : Math.max(session.from, size);
+    }
+    if (session.saved || this.config().keepSessions === false) return;
+    // the path comes from a task file anyone can edit, so it is checked like the server checks it
+    if (!isTranscriptPath(session.transcript, claudeHome())) return;
+    try {
+      const reader = new SessionReader(session.transcript, session.from, this.root);
+      const kept = lastEntries(reader.read(session.to), MAX_SAVED_ENTRIES);
+      const saved: SavedSession = {
+        run: session.run,
+        startedAt: session.startedAt,
+        endedAt: now(),
+        mode: task.mode,
+        model: task.model,
+        clipped: reader.clipped || kept.cut,
+        entries: kept.entries,
+      };
+      const file = this.sessionFile(task.id, session.run);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      writeJsonAtomic(file, saved);
+      session.saved = true;
+    } catch {
+      /* the transcript is still there to read from */
+    }
+  }
+
+  /** Where a run's saved session lives. */
+  sessionFile(taskId: string, run: string): string {
+    if (!RUN_ID.test(run) || !/^[A-Za-z0-9_-]+$/.test(taskId)) throw refuse(400, `"${run}" is not a run id`);
+    return path.join(this.paths.sessions, taskId, `${run}.json`);
+  }
+
+  /** A run's saved session, or null when it was never saved or has been removed. */
+  savedSession(taskId: string, run: string): SavedSession | null {
+    const saved = readJson<SavedSession>(this.sessionFile(taskId, run));
+    return saved && Array.isArray(saved.entries) ? saved : null;
+  }
+
+  /**
+   * Forget a card's sessions: the current one, its history, and every saved
+   * copy. The transcripts themselves are Claude Code's and stay where they are.
+   * A run still being written is refused -- it would only come back.
+   */
+  clearSession(id: string): Task {
+    const task = this.update(id, (t) => {
+      if (t.session && t.session.to === null && (t.column === 'in-progress' || t.column === 'user-input')) {
+        throw refuse(409, 'Claude is still working on this card. Clear its session once the run has finished.');
+      }
+      if (!t.session && !t.sessionHistory.length) return false;
+      t.session = null;
+      t.sessionHistory = [];
+      t.activity.push({ at: now(), kind: 'info', text: 'Session cleared.' });
+    });
+    fs.rmSync(path.join(this.paths.sessions, task.id), { recursive: true, force: true });
+    return task;
+  }
+
+  /**
+   * A new run begins: the session so far becomes history, saved if it was
+   * not already, and the oldest saved copies beyond the cap are deleted.
+   */
+  private retireSession(task: Task): void {
+    const session = task.session;
+    if (!session) return;
+    this.endSession(task);
+    if (session.saved) {
+      const past: PastSession = {
+        run: session.run,
+        startedAt: session.startedAt,
+        // finishedAt is cleared when a card is queued again; the saved copy knows when the run ended
+        endedAt: this.savedSession(task.id, session.run)?.endedAt ?? task.finishedAt ?? now(),
+        mode: task.mode,
+      };
+      const history = [...task.sessionHistory.filter((h) => h.run !== session.run), past];
+      for (const dropped of history.slice(0, Math.max(0, history.length - MAX_SESSION_HISTORY))) {
+        fs.rmSync(this.sessionFile(task.id, dropped.run), { force: true });
+      }
+      task.sessionHistory = history.slice(-MAX_SESSION_HISTORY);
+    }
+    task.session = null;
   }
 
   /** A status entry, carrying the model when one is known. */
@@ -166,12 +303,15 @@ export class Store {
   }
 
   /** Apply a partial settings change and return the whole config. */
-  updateSettings(changes: Partial<Pick<BoardConfig, 'title'>> & { notifications?: Partial<NotificationSettings> }): BoardConfig {
+  updateSettings(
+    changes: Partial<Pick<BoardConfig, 'title' | 'keepSessions'>> & { notifications?: Partial<NotificationSettings> },
+  ): BoardConfig {
     return withLock(this.paths.boardLock, () => {
       const current = this.config();
       const next: BoardConfig = {
         ...current,
         ...(typeof changes.title === 'string' && changes.title.trim() ? { title: changes.title.trim() } : {}),
+        ...(typeof changes.keepSessions === 'boolean' ? { keepSessions: changes.keepSessions } : {}),
         notifications: { ...current.notifications, ...(changes.notifications ?? {}) },
       };
       this.saveConfig(next);
@@ -315,6 +455,8 @@ export class Store {
         worker: input.worker ? requireWorkerName(input.worker) : null,
         claimedBy: null,
         model: null,
+        session: null,
+        sessionHistory: [],
         mode: null,
         returnColumn: null,
         plan: input.plan ?? null,
@@ -407,6 +549,8 @@ export class Store {
 
       if (leaving === target) return;
       if (leaving === 'in-progress') task.cancelRequested = true;
+      // dragged off the run altogether: whatever the session does next is not this card's
+      if (target !== 'in-progress' && target !== 'user-input') this.endSession(task);
       if (target !== 'user-input') task.returnColumn = null;
       if (target === 'plan' || target === 'implement') {
         task.cancelRequested = false;
@@ -612,6 +756,8 @@ export class Store {
         const candidates = laneOrder(this.list().filter((t) => t.column === column && match(t)), folders);
         const task = candidates[0];
         if (!task) continue;
+        // before mode changes: the past run is filed under the mode it ran in
+        this.retireSession(task);
         task.mode = column === 'plan' ? 'plan' : 'implement';
         task.column = 'in-progress';
         task.order = orderFirst(this.column('in-progress').map((t) => t.order));
@@ -619,6 +765,11 @@ export class Store {
         task.finishedAt = null;
         task.cancelRequested = false;
         task.claimedBy = worker;
+        // Only this run's part of the transcript: one session works many cards.
+        const from = this.session ? sizeOf(this.session.transcript) : null;
+        if (this.session && from !== null) {
+          task.session = { ...this.session, from, to: null, run: makeId('r'), startedAt: task.startedAt, saved: false };
+        }
 
         // A claim is where a run begins, so it is the one place that can see
         // the model change between planning and implementing the same card.
@@ -648,6 +799,7 @@ export class Store {
       task.column = 'planned';
       task.order = orderFirst(this.column('planned').filter((t) => t.id !== id).map((t) => t.order));
       task.finishedAt = now();
+      this.endSession(task);
       task.activity.push(this.status('Plan ready for review.'));
     });
   }
@@ -666,6 +818,7 @@ export class Store {
       task.column = 'done';
       task.order = orderFirst(this.column('done').filter((t) => t.id !== id).map((t) => t.order));
       task.finishedAt = now();
+      this.endSession(task);
       task.activity.push(this.status('Done.'));
     });
   }
@@ -710,6 +863,7 @@ export class Store {
     return this.update(task.id, (t) => {
       t.returnColumn = t.mode === 'plan' ? 'plan' : 'implement';
       t.column = 'user-input';
+      this.endSession(t);
       t.activity.push(this.status(reason, 'error'));
     });
   }

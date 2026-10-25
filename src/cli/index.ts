@@ -1,6 +1,6 @@
 import { Store } from '../core/store.ts';
 import { requireRoot } from '../core/paths.ts';
-import { resolveModel } from '../core/model.ts';
+import { currentSession, resolveModel } from '../core/model.ts';
 import { flagString, parseArgs } from './args.ts';
 import { initCommand } from './commands/init.ts';
 import { serveCommand } from './commands/serve.ts';
@@ -101,6 +101,8 @@ async function main(): Promise<void> {
   // Which model is running is worth recording on the card, but it is the
   // board's call whether to: `recordModel: false` in config.json turns it off.
   if (store.config().recordModel !== false) store.model = resolveModel(flagString(args, 'model'));
+  // The Session tab reads the worker's own transcript; `liveSession: false` keeps it out.
+  if (store.config().liveSession !== false) store.session = currentSession();
 
   switch (command) {
     case 'serve': return serveCommand(store, args);

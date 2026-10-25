@@ -179,8 +179,9 @@ a screenshot of the feature you built, a failing test log:
 1. **Claim, never pick.** Only work on a card that `next` handed you. It moves the card to
    In Progress atomically, so two worker sessions never collide.
 2. **Log as you go.** Call `log` at the real milestones — files read, files written, tests
-   run, decisions made. The user is watching this feed instead of your terminal. A few
-   entries per card, not one per tool call.
+   run, decisions made. The card's Session tab already streams your raw terminal; this feed
+   is the short summary on top of it, and it lasts. A few entries per card, not one per tool
+   call.
 3. **Ask instead of guessing.** When a decision is genuinely the user's, use
    `ask <id> "..." --wait`. The card moves to User Input, the question appears in the card's
    chat, and the command returns their answer. On `{"status":"pending"}` the wait timed out:

@@ -568,6 +568,22 @@ describe('board UI', () => {
     expect(JSON.parse(patched[1].body)).toEqual({ notifications: { sound: false } });
   });
 
+  it('turns session history off for the board from Settings', async () => {
+    render(<App />);
+    await connect({ ...(buildSnapshot() as object), keepSessions: true });
+
+    fireEvent.click(await waitFor(() => screen.getByLabelText('Settings')));
+    const keep = await waitFor(() => screen.getByRole('switch', { name: /Keep session history/ }));
+    expect(keep.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(keep);
+    await waitFor(() => expect(keep.getAttribute('aria-checked')).toBe('false'));
+
+    const patched = (globalThis.fetch as any).mock.calls.find(
+      (c: any[]) => String(c[0]).endsWith('/settings') && c[1]?.method === 'PATCH',
+    );
+    expect(JSON.parse(patched[1].body)).toEqual({ keepSessions: false });
+  });
+
   it('shows a card\'s type and labels on its face', async () => {
     render(<App />);
     await connect(buildSnapshot());

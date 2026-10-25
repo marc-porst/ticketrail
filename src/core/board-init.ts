@@ -60,7 +60,8 @@ function copyTree(from: string, to: string, force: boolean, written: string[], r
 function patchGitignore(root: string): void {
   const file = path.join(root, '.gitignore');
   const dir = dataDirName(root);
-  const entries = [`${dir}/.locks/`, `${dir}/.runtime/`];
+  // sessions/ holds copies of terminal output, which can include anything a command printed
+  const entries = [`${dir}/.locks/`, `${dir}/.runtime/`, `${dir}/sessions/`];
   const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
   const missing = entries.filter((e) => !current.split(/\r?\n/).includes(e));
   if (!missing.length) return;

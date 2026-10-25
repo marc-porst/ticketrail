@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Markdown } from './Markdown.tsx';
 import { Attachments } from './Attachments.tsx';
 import { RelatedCards } from './RelatedCards.tsx';
@@ -23,7 +23,9 @@ import {
   type TaskType,
 } from '../lib/types.ts';
 
-type Tab = 'description' | 'plan' | 'result' | 'related' | 'files' | 'activity' | 'chat';
+const SessionFeed = lazy(() => import('./SessionFeed.tsx').then((m) => ({ default: m.SessionFeed })));
+
+type Tab = 'description' | 'plan' | 'result' | 'session' | 'related' | 'files' | 'activity' | 'chat';
 
 const KIND_COLOR: Record<string, string> = {
   info: 'bg-zinc-600',
@@ -93,7 +95,15 @@ export function CardDetail({
   const running = task.column === 'in-progress';
   const referencedBy = allTasks.filter((t) => (t.related ?? []).includes(task.id)).length;
   const [tab, setTab] = useState<Tab>(() =>
-    waiting ? 'chat' : task.result ? 'result' : task.plan ? 'plan' : 'description',
+    waiting
+      ? 'chat'
+      : running && task.session
+        ? 'session'
+        : task.result
+          ? 'result'
+          : task.plan
+            ? 'plan'
+            : 'description',
   );
 
   useEffect(() => {
@@ -108,12 +118,15 @@ export function CardDetail({
         { id: 'description' as const, label: 'Description' },
         { id: 'plan' as const, label: 'Plan', dot: Boolean(task.plan) },
         ...(task.result ? [{ id: 'result' as const, label: 'Result', done: true }] : []),
+        ...(task.session || task.sessionHistory.length
+          ? [{ id: 'session' as const, label: 'Session', live: running && task.session?.to === null }]
+          : []),
         { id: 'related' as const, label: 'Related', count: (task.related ?? []).length + referencedBy },
         { id: 'files' as const, label: 'Files', count: task.attachments.length },
         { id: 'activity' as const, label: 'Activity', count: task.activity.length },
         { id: 'chat' as const, label: 'Chat', count: task.messages.length, alert: Boolean(waiting) },
-      ] satisfies { id: Tab; label: string; count?: number; dot?: boolean; alert?: boolean; done?: boolean }[],
-    [task.plan, task.result, task.related, referencedBy, task.attachments.length, task.activity.length, task.messages.length, waiting],
+      ] satisfies { id: Tab; label: string; count?: number; dot?: boolean; alert?: boolean; done?: boolean; live?: boolean }[],
+    [task.plan, task.result, task.session, task.sessionHistory.length, running, task.related, referencedBy, task.attachments.length, task.activity.length, task.messages.length, waiting],
   );
 
   return (
@@ -193,13 +206,13 @@ export function CardDetail({
           </dl>
         </header>
 
-        <nav className="flex gap-1 border-b border-[var(--color-line)] px-3">
+        <nav className="pk-tabs flex overflow-x-auto border-b border-[var(--color-line)] px-3">
           {tabs.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
               className={cx(
-                'relative -mb-px border-b-2 px-3 py-2.5 text-[12.5px] font-medium transition',
+                'relative -mb-px flex shrink-0 items-center border-b-2 px-2 py-2.5 text-[12.5px] font-medium whitespace-nowrap transition',
                 tab === t.id ? 'border-sky-400 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300',
               )}
             >
@@ -208,6 +221,7 @@ export function CardDetail({
               {'dot' in t && t.dot ? <span className="ml-1.5 inline-block size-1.5 rounded-full bg-indigo-400 align-middle" /> : null}
               {'alert' in t && t.alert ? <span className="ml-1.5 inline-block size-1.5 rounded-full bg-amber-400 align-middle pk-live" /> : null}
               {'done' in t && t.done ? <span className="ml-1.5 inline-block size-1.5 rounded-full bg-emerald-400 align-middle" /> : null}
+              {'live' in t && t.live ? <span className="ml-1.5 inline-block size-1.5 rounded-full bg-emerald-400 align-middle pk-live" title="Live" /> : null}
             </button>
           ))}
         </nav>
@@ -271,6 +285,12 @@ export function CardDetail({
 
           {tab === 'files' && (
             <Attachments task={task} projectId={projectId} onUpload={onUpload} onRemove={onRemoveAttachment} />
+          )}
+
+          {tab === 'session' && (
+            <Suspense fallback={null}>
+              <SessionFeed task={task} projectId={projectId} />
+            </Suspense>
           )}
 
           {tab === 'activity' && <ActivityFeed task={task} />}

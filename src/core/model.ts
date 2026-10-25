@@ -13,7 +13,7 @@ const TAIL_BYTES = 256 * 1024;
 /** A model value Claude Code writes for records that had no real completion. */
 const SYNTHETIC = '<synthetic>';
 
-function claudeHome(): string {
+export function claudeHome(): string {
   return process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), '.claude');
 }
 
@@ -86,6 +86,13 @@ export function modelFromTranscript(file: string): string | null {
     if (typeof model === 'string' && model && model !== SYNTHETIC) return model;
   }
   return null;
+}
+
+/** The Claude Code session this process runs in, with its transcript; null outside Claude Code. */
+export function currentSession(): { id: string; transcript: string } | null {
+  const id = process.env.CLAUDE_CODE_SESSION_ID ?? '';
+  const transcript = findTranscript(id);
+  return transcript ? { id, transcript } : null;
 }
 
 /**

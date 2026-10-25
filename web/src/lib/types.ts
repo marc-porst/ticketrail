@@ -6,9 +6,13 @@ export type {
   Message,
   Mode,
   PastResult,
+  PastSession,
   Task,
+  TaskSession,
   TaskType,
 } from '../../../src/core/task.ts';
+export type { SessionEntry } from '../../../src/core/transcript.ts';
+export type { SessionSnapshot } from '../../../src/server/session.ts';
 export {
   COLUMNS,
   COLUMN_LABELS,
@@ -62,6 +66,8 @@ export interface BoardSnapshot {
   title: string;
   /** Absent when an older server is serving this page. */
   settings?: NotificationSettings;
+  /** Whether runs' sessions are saved with their cards. Absent from an older server. */
+  keepSessions?: boolean;
   /** Absent when an older server is serving this page. */
   project?: Project;
   columns: ColumnMeta[];

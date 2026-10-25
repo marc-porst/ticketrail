@@ -23,6 +23,8 @@ export interface Paths {
   data: string;
   tasks: string;
   files: string;
+  /** Saved copies of each run's session, one folder per card. */
+  sessions: string;
   locks: string;
   runtime: string;
   /** Heartbeats of the workers currently waiting on this board. */
@@ -40,6 +42,7 @@ export function pathsFor(root: string): Paths {
     data,
     tasks: path.join(data, 'tasks'),
     files: path.join(data, 'files'),
+    sessions: path.join(data, 'sessions'),
     locks: path.join(data, '.locks'),
     runtime: path.join(data, '.runtime'),
     workers: path.join(data, '.runtime', 'workers'),

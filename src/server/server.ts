@@ -24,6 +24,7 @@ import { COLUMNS, COLUMN_HINTS, COLUMN_LABELS, isColumn, isTaskType, TASK_TYPES 
 import { displayName, mimeForExtension } from '../core/files.ts';
 import { Router, readJsonBody, sendJson, type Ctx, type Handler } from './http.ts';
 import { SseHub } from './sse.ts';
+import { sendSavedSession, sendSession, streamSession } from './session.ts';
 import { streamToFile } from './upload.ts';
 import { resolveWebRoot, serveStatic } from './static.ts';
 
@@ -43,6 +44,7 @@ function snapshot(store: Store) {
       shortPath: shortenPath(store.root),
     },
     settings: store.config().notifications,
+    keepSessions: store.config().keepSessions,
     columns: COLUMNS.map((id) => ({ id, label: COLUMN_LABELS[id], hint: COLUMN_HINTS[id] })),
     folders: store.folders(),
     tasks: store.list(),
@@ -215,7 +217,10 @@ export async function startServer(store: Store, options: { port?: number; host?:
 
   router.get(
     '/api/projects/:pid/settings',
-    board((s, { res }) => sendJson(res, 200, { title: s.config().title, notifications: s.config().notifications })),
+    board((s, { res }) => {
+      const config = s.config();
+      sendJson(res, 200, { title: config.title, notifications: config.notifications, keepSessions: config.keepSessions });
+    }),
   );
 
   router.patch(
@@ -227,8 +232,9 @@ export async function startServer(store: Store, options: { port?: number; host?:
       for (const flag of flags) {
         if (typeof body?.notifications?.[flag] === 'boolean') notifications[flag] = body.notifications[flag];
       }
-      const config = s.updateSettings({ title: body.title, notifications });
-      sendJson(res, 200, { title: config.title, notifications: config.notifications });
+      const keepSessions = typeof body?.keepSessions === 'boolean' ? body.keepSessions : undefined;
+      const config = s.updateSettings({ title: body.title, notifications, keepSessions });
+      sendJson(res, 200, { title: config.title, notifications: config.notifications, keepSessions: config.keepSessions });
     }),
   );
 
@@ -287,6 +293,21 @@ export async function startServer(store: Store, options: { port?: number; host?:
       }
       sendJson(res, 200, s.patch(params.id, body));
     }),
+  );
+
+  // The worker's terminal for this card, read from its Claude Code transcript.
+  router.get('/api/projects/:pid/tasks/:id/session', board((s, { res, params }) => sendSession(s, params.id, res)));
+  router.get(
+    '/api/projects/:pid/tasks/:id/session/events',
+    board((s, { res, params }) => streamSession(s, params.id, res)),
+  );
+  router.delete(
+    '/api/projects/:pid/tasks/:id/session',
+    board((s, { res, params }) => sendJson(res, 200, s.clearSession(params.id))),
+  );
+  router.get(
+    '/api/projects/:pid/tasks/:id/sessions/:run',
+    board((s, { res, params }) => sendSavedSession(s, params.id, params.run, res)),
   );
 
   // Folders: optional groups that span every lane. The watcher broadcasts the

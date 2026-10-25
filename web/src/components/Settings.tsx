@@ -8,12 +8,17 @@ export function Settings({
   onChange,
   confirmLinks,
   onConfirmLinksChange,
+  keepSessions,
+  onKeepSessionsChange,
 }: {
   settings: NotificationSettings;
   onChange: (changes: Partial<NotificationSettings>) => void;
   /** Ask before a drop links two cards. Kept in this browser, not in config.json. */
   confirmLinks?: boolean;
   onConfirmLinksChange?: (on: boolean) => void;
+  /** Save each run's session with its card. Board-wide, in config.json. */
+  keepSessions?: boolean;
+  onKeepSessionsChange?: (on: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [permission, setPermission] = useState<Permission>(() => notificationPermission());
@@ -116,8 +121,24 @@ export function Settings({
             </>
           )}
 
+          {onKeepSessionsChange && (
+            <>
+              <p className="border-t border-b border-[var(--color-line)] px-3 py-2 text-[10.5px] font-semibold tracking-wide text-zinc-500 uppercase">
+                Sessions
+              </p>
+              <div className="p-1.5">
+                <Toggle
+                  label="Keep session history"
+                  hint="Save every run's terminal output with its card, so it stays readable after Claude Code deletes its transcripts (30 days). Off: the Session tab only reads the live transcript"
+                  checked={keepSessions ?? true}
+                  onChange={onKeepSessionsChange}
+                />
+              </div>
+            </>
+          )}
+
           <p className="border-t border-[var(--color-line)] px-3 py-2 text-[10.5px] leading-relaxed text-zinc-600">
-            Alerts are saved in <code className="rounded bg-black/40 px-1 text-zinc-500">.ticketrail/config.json</code>, so they
+            Alerts and sessions are saved in <code className="rounded bg-black/40 px-1 text-zinc-500">.ticketrail/config.json</code>, so they
             apply to this board everywhere.
           </p>
         </div>

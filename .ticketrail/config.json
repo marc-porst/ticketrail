@@ -7,5 +7,7 @@
     "desktop": true,
     "onStart": false
   },
-  "recordModel": true
+  "recordModel": true,
+  "liveSession": true,
+  "keepSessions": true
 }

@@ -51,6 +51,7 @@ export default function App() {
 
   // Board-wide, so everyone opening this board gets the same alerts.
   const [settings, setSettings] = useState<NotificationSettings>({ sound: true, desktop: true, onStart: false });
+  const [keepSessions, setKeepSessions] = useState(true);
   const announce = useCallback(
     (kind: ChangeKind, task: Task) => {
       if (kind === 'started' && !settings.onStart) return;
@@ -192,6 +193,9 @@ export default function App() {
   useEffect(() => {
     if (snapshot?.settings) setSettings(snapshot.settings);
   }, [snapshot?.settings]);
+  useEffect(() => {
+    if (typeof snapshot?.keepSessions === 'boolean') setKeepSessions(snapshot.keepSessions);
+  }, [snapshot?.keepSessions]);
 
   // A browser will not play a sound before the page has been interacted with.
   useEffect(() => {
@@ -487,6 +491,11 @@ export default function App() {
             onChange={(changes) => {
               setSettings((s) => ({ ...s, ...changes }));
               void run(() => api!.saveSettings(changes));
+            }}
+            keepSessions={keepSessions}
+            onKeepSessionsChange={(on) => {
+              setKeepSessions(on);
+              void run(() => api!.saveKeepSessions(on));
             }}
           />
           <WorkerIndicator

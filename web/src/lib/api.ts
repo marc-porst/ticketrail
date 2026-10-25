@@ -63,13 +63,24 @@ export function apiFor(projectId: string) {
   return {
   board: () => request<BoardSnapshot>(`${base}/board`),
 
-  settings: () => request<{ title: string; notifications: NotificationSettings }>(`${base}/settings`),
+  settings: () =>
+    request<{ title: string; notifications: NotificationSettings; keepSessions: boolean }>(`${base}/settings`),
 
   saveSettings: (notifications: Partial<NotificationSettings>) =>
-    request<{ title: string; notifications: NotificationSettings }>(`${base}/settings`, {
+    request<{ title: string; notifications: NotificationSettings; keepSessions: boolean }>(`${base}/settings`, {
       method: 'PATCH',
       body: JSON.stringify({ notifications }),
     }),
+
+  /** Whether each run's session is saved with its card. */
+  saveKeepSessions: (keepSessions: boolean) =>
+    request<{ title: string; notifications: NotificationSettings; keepSessions: boolean }>(`${base}/settings`, {
+      method: 'PATCH',
+      body: JSON.stringify({ keepSessions }),
+    }),
+
+  /** Remove a card's sessions, history and saved copies. */
+  clearSession: (id: string) => request<Task>(`${base}/tasks/${id}/session`, { method: 'DELETE' }),
 
   create: (input: { title: string; description?: string; column?: Column; type?: TaskType | null; labels?: string[] }) =>
     request<Task>(`${base}/tasks`, { method: 'POST', body: JSON.stringify(input) }),

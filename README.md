@@ -10,7 +10,8 @@ Claude Code works from.
 Building with Claude Code is iterative — you prompt, review, prompt again. Those prompts
 end up in terminal scrollback or in a ticket far away from the code. Ticketrail puts them
 on a board in the repo instead: you queue cards, Claude picks them up, plans or builds them,
-asks you questions inside the card, and moves them along. The UI updates live while it works.
+asks you questions inside the card, and moves them along. The UI updates live while it works,
+down to every command Claude runs.
 
 The whole bridge is plain JSON on disk. The React UI writes it, Claude writes it, and
 `chokidar` tells everyone else. No daemon, no database, no service to sign up for.
@@ -110,6 +111,15 @@ Claude did, and when.
   <img src="docs/images/guide-working.png" alt="A card's Activity tab listing each step with a time" width="480">
 </p>
 
+Want to see everything, the way the worker's terminal shows it? Open the **Session** tab. It
+streams Claude's messages and every command, file read and edit as they happen, with the output
+folded underneath each one (errors open by themselves). It follows the bottom like a terminal; scroll
+up to read and a *Jump to latest* button brings you back. If the card went to an agent, the
+agent's own steps appear indented under it. Every run is kept: the latest one is
+always shown, and the runs before it are listed underneath, collapsed, like earlier results.
+**Clear session** at the top of the tab removes a card's sessions once its run has finished. To stop
+keeping them at all, turn off **Keep session history** in Settings ⚙️.
+
 Changed your mind halfway? Just write in the card's **Chat** or add a file. Claude picks it up
 at its next step. (Type, agent and worker are locked while it works, so the card can't change
 hands mid-way.)
@@ -134,6 +144,8 @@ The earlier result is kept further down, so nothing gets lost.
   only those cards.
 - 🔗 **Related cards:** drop a card onto another card to say "read this one too". Handy for a bug
   that belongs to an earlier feature.
+- 🖥️ **Session:** every card keeps what Claude did on it, step by step, run by run. Open the
+  card's **Session** tab to watch live or look back later.
 - 🔔 **Alerts:** the ⚙️ menu can play a sound or show a notification when a card moves, so you
   don't have to keep watching.
 - 🗂️ **Several projects:** click the project name at the top left to switch between boards.
@@ -363,6 +375,15 @@ Drag it back. If Claude already started, dragging it out of <i>In Progress</i> t
 
 The board itself is just files inside your project folder. There's no account and no cloud
 service. Claude works on your computer like it always does.
+</details>
+
+<details>
+<summary><b>How long can I look back at what Claude did on a card?</b></summary>
+
+As long as you like. The <b>Session</b> tab keeps a copy of every run with the card, separate
+from Claude Code's own files (which it deletes after 30 days), up to the last 20 runs per card.
+To remove it, use <b>Clear session</b> at the top of the tab. To stop keeping copies at all, turn
+off <b>Keep session history</b> in Settings ⚙️.
 </details>
 
 <details>
@@ -687,8 +708,9 @@ The model is **observed rather than self-reported**. Claude Code writes a transc
 session under `~/.claude/projects/`, and every assistant turn in it records the model the API
 actually answered with; the CLI reads the last 256 KB of the file for this session and takes the
 most recent one. That costs about a millisecond, is unaffected by the size of the transcript,
-and cannot be wrong in the way a model describing itself can be. Only `type`, `isSidechain` and
-`message.model` are read — never message content.
+and cannot be wrong in the way a model describing itself can be. For this, only `type`,
+`isSidechain` and `message.model` are read — never message content. (The Session tab, below, is
+the one place that does read content.)
 
 Moves you make yourself are never attributed to a model, because the browser talks to the
 server and the server never has one.
@@ -697,6 +719,70 @@ Outside Claude Code there is nothing to read and nothing is recorded, which is t
 outcome for a board driven by hand. To say so explicitly, pass `--model <id>` or set
 `TICKETRAIL_MODEL`. To record nothing at all, set `"recordModel": false` in
 `.ticketrail/config.json`.
+
+## The Session tab
+
+Each card has a **Session** tab that shows what the worker's terminal shows while it works the card:
+Claude's messages, every tool call (Bash, Read, Edit, Grep, Agent…) with a one-line summary, and
+the output folded underneath. It updates live, it keeps every run, and it needs nothing from the
+worker. It reads the same Claude Code transcript that [model detection](#which-model-did-the-work)
+uses.
+
+### What a card records
+
+When `next` claims a card, the card notes the worker's session id, the transcript path and the
+byte offset the file had reached. `plan`, `done`, `fail`, or dragging the card off the run notes
+where it stopped. A worker session that works ten cards in a row therefore shows each card only its
+own run. Several workers never mix, because each one is its own Claude Code session with its own
+transcript.
+
+### What it shows
+
+The board server reads that byte range only while somebody has the tab open. It sends a snapshot of
+the last 300 entries, then new lines over Server-Sent Events as Claude Code appends them; the stream
+ends with the run. Tool output is cut at 4 KB, and errors are shown in red and expanded. Thinking,
+system reminders and the prompts the worker was given are left out.
+
+A card handed to a [project agent](#agents-give-a-card-to-a-specialist-) is worked by a subagent.
+Claude Code writes a subagent's steps to their own file, `<session>/subagents/agent-<id>.jsonl`,
+next to a `.meta.json` that names the Agent call that started it. The Session tab follows those
+files too: a subagent's commands, reads and edits appear nested under its Agent call (collapsible,
+*Subagent · N steps*), live and in the saved copy. A subagent started by a subagent is included.
+Only subagents started during the card's own run are shown.
+
+### History
+
+Every run is kept, the same way results are. The latest run is always shown at the top, as
+*Run N · Plan/Implement*. The runs before it are listed under **Earlier sessions**, newest first and
+collapsed; each loads when you open it.
+
+When a run ends, its entries are saved to `.ticketrail/sessions/<card>/<run>.json`: at most 2,000
+entries, with output already cut. A finished run is read from that copy, so it outlives Claude
+Code's own cleanup of old transcripts (after 30 days by default). When the card is claimed again,
+the previous run moves into the card's `sessionHistory`. The last 20 runs are kept, and older
+copies are deleted.
+
+### Clearing
+
+**Clear session**, at the top of the tab, asks once and then removes the card's `session` and
+`sessionHistory` from its JSON file and deletes its folder in `.ticketrail/sessions/`. Claude
+Code's transcript is not touched. The button is disabled while a run is still being written, and
+the server refuses that case with 409.
+
+### Settings
+
+| Where | Key in `.ticketrail/config.json` | Default | What it does |
+| --- | --- | --- | --- |
+| Settings ⚙️ → Sessions → **Keep session history** | `keepSessions` | `true` | Save each finished run to `.ticketrail/sessions/` and build up history. Off: nothing new is saved; the tab still shows the current run from the live transcript while that exists. Copies already saved stay until cleared. |
+| config file only | `liveSession` | `true` | Record where each run lives at all. Off: cards get no session and the tab doesn't appear. |
+
+### Privacy
+
+Everything stays on your machine. The server binds to localhost. It reads and copies transcripts
+only from inside `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`), whatever a task file
+claims. Tool output can include anything a command printed, secrets included, so `ticketrail init`
+adds `.ticketrail/sessions/` to `.gitignore`. Clear a card's session, or turn the settings above
+off, if that matters for a project.
 
 ## The CLI
 
@@ -760,8 +846,12 @@ Every write goes through a `mkdir`-based lock and lands via `rename`, so the boa
 consistent when Claude and the browser act at the same moment. `next` claims a card under
 that same lock, so two worker sessions never get the same one.
 
-Commit `.ticketrail/tasks/` — the board is part of the project. `.locks/` and `.runtime/`
-are ignored.
+Each card's Session tab data lives in two places. The card file holds a pointer: `session` (the
+current run's transcript and byte range) and `sessionHistory` (earlier runs). The saved copies of
+the runs' entries are in `.ticketrail/sessions/<card>/<run>.json`. See [The Session tab](#the-session-tab).
+
+Commit `.ticketrail/tasks/` — the board is part of the project. `.locks/`, `.runtime/` and
+`sessions/` are ignored; the session copies can contain anything a command printed.
 
 ## Development
 
