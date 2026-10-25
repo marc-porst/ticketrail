@@ -115,8 +115,19 @@ Want to see everything, the way the worker's terminal shows it? Open the **Sessi
 streams Claude's messages and every command, file read and edit as they happen, with the output
 folded underneath each one (errors open by themselves). It follows the bottom like a terminal; scroll
 up to read and a *Jump to latest* button brings you back. If the card went to an agent, the
-agent's own steps appear indented under it. Every run is kept: the latest one is
-always shown, and the runs before it are listed underneath, collapsed, like earlier results.
+agent's own steps appear indented under it.
+
+<p align="center">
+  <img src="docs/images/guide-session.png" alt="A card's Session tab: Claude's message, Read and Edit steps, and a failing test run opened in red" width="480">
+</p>
+
+Every run is kept: the latest one is always shown, and the runs before it are listed underneath,
+collapsed, like earlier results.
+
+<p align="center">
+  <img src="docs/images/guide-session-history.png" alt="The end of the Session tab: the last steps, a Live marker, and Earlier sessions with Run 1 · Plan collapsed" width="480">
+</p>
+
 **Clear session** at the top of the tab removes a card's sessions once its run has finished. To stop
 keeping them at all, turn off **Keep session history** in Settings ⚙️.
 
