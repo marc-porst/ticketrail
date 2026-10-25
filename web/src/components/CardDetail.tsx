@@ -42,7 +42,7 @@ export function CardDetail({
   onClose,
   onPatch,
   onReply,
-  onArchive,
+  onDelete,
   onUpload,
   onRemoveAttachment,
   onDerive,
@@ -74,7 +74,8 @@ export function CardDetail({
     }>,
   ) => void;
   onReply: (text: string) => void;
-  onArchive: () => void;
+  /** Asks first (unless told not to), then deletes the card. */
+  onDelete: () => void;
   onUpload: (files: File[]) => Promise<void>;
   onRemoveAttachment: (fileId: string) => void;
   onDerive: () => void;
@@ -311,8 +312,13 @@ export function CardDetail({
 
         <footer className="flex items-center justify-between border-t border-[var(--color-line)] px-5 py-2.5">
           <span className="font-mono text-[10.5px] text-zinc-700">{task.id}</span>
-          <button onClick={onArchive} className="text-[11.5px] text-zinc-600 transition hover:text-red-400">
-            Archive card
+          <button
+            onClick={onDelete}
+            disabled={running}
+            title={running ? 'Claude is working on this card. Move it out of In Progress to delete it.' : undefined}
+            className="text-[11.5px] text-zinc-600 transition hover:text-red-400 disabled:cursor-not-allowed disabled:hover:text-zinc-600"
+          >
+            Delete card
           </button>
         </footer>
       </aside>

@@ -117,7 +117,11 @@ export function apiFor(projectId: string) {
   /** The folder's cards are kept and become unfiled. */
   deleteFolder: (id: string) => request<Folder[]>(`${base}/folders/${id}`, { method: 'DELETE' }),
 
-  archive: (id: string) => request<Task>(`${base}/tasks/${id}`, { method: 'DELETE' }),
+  /** Deletes the card for good, with its files and every link to it. */
+  deleteCard: (id: string) =>
+    request<{ deleted: { id: string; number: number; title: string }; unlinked: number[] }>(`${base}/tasks/${id}`, {
+      method: 'DELETE',
+    }),
 
   /** The File is posted as the raw body — no multipart, no base64 inflation. */
   upload: async (id: string, file: File): Promise<Attachment> => {

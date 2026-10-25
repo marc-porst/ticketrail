@@ -218,6 +218,41 @@ describe('board UI', () => {
     });
   });
 
+  it('deletes a card only after the warning, and stops asking once told to', async () => {
+    const { container } = render(<App />);
+    await connect(buildSnapshot());
+    const openCard = async () => {
+      await waitFor(() => expect(screen.getByText('Write the onboarding email copy')).toBeTruthy());
+      fireEvent.click(screen.getByText('Write the onboarding email copy').closest('button')!);
+      return waitFor(() => container.querySelector('[role="dialog"]') as HTMLElement);
+    };
+    const deletes = () =>
+      (globalThis.fetch as any).mock.calls.filter(([, init]: any[]) => init?.method === 'DELETE').length;
+
+    // cancel: nothing is deleted
+    let drawer = await openCard();
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Delete card' }));
+    let warning = await waitFor(() => screen.getByRole('dialog', { name: 'Delete card' }));
+    expect(within(warning).getByText(/cannot be undone/)).toBeTruthy();
+    fireEvent.click(within(warning).getByRole('button', { name: 'Cancel' }));
+    expect(deletes()).toBe(0);
+
+    // confirm, ticking "don't show this again"
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Delete card' }));
+    warning = await waitFor(() => screen.getByRole('dialog', { name: 'Delete card' }));
+    fireEvent.click(within(warning).getByLabelText("Don't show this again"));
+    fireEvent.click(within(warning).getByRole('button', { name: 'Delete card' }));
+    await waitFor(() => expect(deletes()).toBe(1));
+    expect(localStorage.getItem('pk:confirm-delete')).toBe('off');
+
+    // next time it deletes straight away
+    drawer = await openCard();
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Delete card' }));
+    await waitFor(() => expect(deletes()).toBe(2));
+    expect(screen.queryByRole('dialog', { name: 'Delete card' })).toBeNull();
+    localStorage.removeItem('pk:confirm-delete');
+  });
+
   it('filters every lane by the search box, on title and description only', async () => {
     render(<App />);
     await connect(buildSnapshot());

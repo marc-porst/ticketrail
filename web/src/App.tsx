@@ -22,6 +22,8 @@ import { lazyView } from './lib/lazyView.tsx';
 import { WorkerIndicator } from './components/WorkerIndicator.tsx';
 import { LinkConfirm } from './components/LinkConfirm.tsx';
 import { setConfirmLink, shouldConfirmLink } from './lib/confirmLink.ts';
+import { setConfirmDelete, shouldConfirmDelete } from './lib/confirmDelete.ts';
+import { DeleteConfirm } from './components/DeleteConfirm.tsx';
 import { SpacesModal } from './components/SpacesModal.tsx';
 import { FoldersModal } from './components/FoldersModal.tsx';
 import { useCollapsed } from './lib/useCollapsed.ts';
@@ -294,6 +296,13 @@ export default function App() {
   /** A drop that would link two cards, held until the user confirms it. */
   const [pendingLink, setPendingLink] = useState<{ dragged: Task; target: Task } | null>(null);
   const [confirmLinks, setConfirmLinks] = useState(() => shouldConfirmLink());
+  /** A delete waiting for the user to confirm it, and how to close the card's view once it is gone. */
+  const [pendingDelete, setPendingDelete] = useState<{ task: Task; close: () => void } | null>(null);
+  const [confirmDeletes, setConfirmDeletes] = useState(() => shouldConfirmDelete());
+  const deleteCard = (task: Task, close: () => void) => {
+    close();
+    void run(() => api!.deleteCard(task.id).then((r) => (refresh(), r)));
+  };
   const link = (targetId: string, related: string[]) =>
     void run(() => api!.patch(targetId, { related }).then((t) => (refresh(), t)));
 
@@ -327,10 +336,7 @@ export default function App() {
         setRelationsOpen(false);
         setAgentsOpen(true);
       }}
-      onArchive={() => {
-        onClose();
-        void run(() => api!.archive(task.id).then((t) => (refresh(), t)));
-      }}
+      onDelete={() => (shouldConfirmDelete() ? setPendingDelete({ task, close: onClose }) : deleteCard(task, onClose))}
     />
   );
 
@@ -536,6 +542,11 @@ export default function App() {
             ))}
           </div>
           <Settings
+            confirmDeletes={confirmDeletes}
+            onConfirmDeletesChange={(on) => {
+              setConfirmDelete(on);
+              setConfirmDeletes(on);
+            }}
             confirmLinks={confirmLinks}
             onConfirmLinksChange={(on) => {
               setConfirmLink(on);
@@ -665,6 +676,25 @@ export default function App() {
         <Suspense fallback={null}>
           <SkillsModal key={selected} api={api} onClose={() => setSkillsOpen(false)} onChanged={onSkillsChanged} />
         </Suspense>
+      )}
+
+      {pendingDelete && (
+        <DeleteConfirm
+          task={pendingDelete.task}
+          linkedFrom={(snapshot?.tasks ?? []).filter(
+            (t) => (t.related ?? []).includes(pendingDelete.task.id) || t.derivedFrom === pendingDelete.task.id,
+          )}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={(dontAskAgain) => {
+            const { task, close } = pendingDelete;
+            setPendingDelete(null);
+            if (dontAskAgain) {
+              setConfirmDelete(false);
+              setConfirmDeletes(false);
+            }
+            deleteCard(task, close);
+          }}
+        />
       )}
 
       {pendingLink && (

@@ -130,7 +130,7 @@ export function RelationsModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose, gesture, openCard, draft]);
 
-  // a card archived while it is open in the panel
+  // a card deleted while it is open in the panel
   useEffect(() => {
     if (openCard && !tasks.some((t) => t.id === openCard)) setOpenCard(null);
   }, [tasks, openCard]);

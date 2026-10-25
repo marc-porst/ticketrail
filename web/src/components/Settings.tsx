@@ -8,6 +8,8 @@ export function Settings({
   onChange,
   confirmLinks,
   onConfirmLinksChange,
+  confirmDeletes,
+  onConfirmDeletesChange,
   keepSessions,
   onKeepSessionsChange,
 }: {
@@ -16,6 +18,9 @@ export function Settings({
   /** Ask before a drop links two cards. Kept in this browser, not in config.json. */
   confirmLinks?: boolean;
   onConfirmLinksChange?: (on: boolean) => void;
+  /** Ask before a card is deleted. Kept in this browser, not in config.json. */
+  confirmDeletes?: boolean;
+  onConfirmDeletesChange?: (on: boolean) => void;
   /** Save each run's session with its card. Board-wide, in config.json. */
   keepSessions?: boolean;
   onKeepSessionsChange?: (on: boolean) => void;
@@ -117,6 +122,14 @@ export function Settings({
                   checked={confirmLinks ?? true}
                   onChange={onConfirmLinksChange}
                 />
+                {onConfirmDeletesChange && (
+                  <Toggle
+                    label="Ask before deleting a card"
+                    hint="Deleting cannot be undone. This browser only"
+                    checked={confirmDeletes ?? true}
+                    onChange={onConfirmDeletesChange}
+                  />
+                )}
               </div>
             </>
           )}

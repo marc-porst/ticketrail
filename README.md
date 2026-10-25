@@ -150,6 +150,9 @@ The earlier result is kept further down, so nothing gets lost.
 ### Handy extras 🎁
 
 - 🔎 **Search:** press <kbd>/</kbd> and type a word to find any card.
+- 🗑️ **Delete a card:** **Delete card** at the bottom of a card. It asks first, because deleting
+  can't be undone; tick *Don't show this again* to skip the question (switch it back on in
+  Settings ⚙️ → Board).
 - 📁 **Folders:** group cards by topic ("Shopping list", "Recipes"). Optional, purely for tidiness.
 - 🏷️ **Labels:** little coloured tags such as `design` or `mobile`. Click one at the top to show
   only those cards.
@@ -884,6 +887,13 @@ One JSON file per card in `.ticketrail/tasks/`, holding its column, a fractional
 the plan, the activity feed, the chat, and the ids of any attached files (the bytes live beside
 them in `.ticketrail/files/`). One file per card rather than one big array: two
 independent writers on a single file lose updates, and per-card files give clean git diffs.
+
+**Deleting a card** removes its file, its attachments in `.ticketrail/files/` and its saved
+sessions, and takes it out of every other card's `related` list (and `derivedFrom`), noting
+"Unlinked #n (the card was deleted)" in each of those cards' activity. It is refused while the
+card is In Progress, because the worker would only write it back. (Older boards may still
+have cards marked `"archived": true` from before deleting existed; they stay hidden and can be
+deleted the same way.)
 
 Every write goes through a `mkdir`-based lock and lands via `rename`, so the board stays
 consistent when Claude and the browser act at the same moment. `next` claims a card under

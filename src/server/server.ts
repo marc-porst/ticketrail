@@ -422,7 +422,7 @@ export async function startServer(store: Store, options: { port?: number; host?:
 
   router.delete(
     '/api/projects/:pid/tasks/:id',
-    board((s, { res, params }) => sendJson(res, 200, s.archive(params.id))),
+    board((s, { res, params }) => sendJson(res, 200, s.deleteTask(params.id))),
   );
 
   /** Spawn a Feature card from a finished investigation. */

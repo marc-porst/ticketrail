@@ -1345,10 +1345,38 @@ var Store = class _Store {
   move(id, column, before, after) {
     return this.patch(id, { column, before, after });
   }
-  archive(id) {
-    return this.update(id, (task) => {
-      task.archived = true;
+  /**
+   * Delete a card for good: its file, its attachments, its saved sessions,
+   * and every link other cards made to it (related, or derived from it), each
+   * noted in that card's activity. Refused while Claude is working the card:
+   * the worker would only write it back. Card files from before deleting
+   * existed may still say `archived`; those stay hidden, and can be deleted too.
+   */
+  deleteTask(id) {
+    const result = withLock(this.paths.boardLock, () => {
+      const task = this.get(id);
+      if (!task) throw refuse(404, `No task with id "${id}"`);
+      if (task.column === "in-progress") {
+        throw refuse(409, `Claude is working on #${task.number}. Move it out of In Progress first, then delete it.`);
+      }
+      const unlinked = [];
+      for (const other of this.list({ includeArchived: true })) {
+        if (other.id === id) continue;
+        const linked = other.related.includes(id);
+        const derived = other.derivedFrom === id;
+        if (!linked && !derived) continue;
+        other.related = other.related.filter((r) => r !== id);
+        if (derived) other.derivedFrom = null;
+        other.activity.push({ at: now(), kind: "info", text: `Unlinked #${task.number} (the card was deleted).` });
+        this.save(other);
+        unlinked.push(other.number);
+      }
+      for (const attachment of task.attachments) fs5.rmSync(this.filePath(attachment), { force: true });
+      fs5.rmSync(path6.join(this.paths.sessions, task.id), { recursive: true, force: true });
+      fs5.rmSync(this.taskFile(task.id), { force: true });
+      return { deleted: { id: task.id, number: task.number, title: task.title }, unlinked };
     });
+    return result;
   }
   activity(id, text, kind = "info") {
     return this.update(id, (task) => {
@@ -3336,7 +3364,7 @@ async function startServer(store, options = {}) {
   );
   router.delete(
     "/api/projects/:pid/tasks/:id",
-    board((s, { res, params }) => sendJson(res, 200, s.archive(params.id)))
+    board((s, { res, params }) => sendJson(res, 200, s.deleteTask(params.id)))
   );
   router.post(
     "/api/projects/:pid/tasks/:id/derive",

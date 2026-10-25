@@ -26,7 +26,7 @@ function detail(raw: object) {
       onClose={noop}
       onPatch={noop}
       onReply={noop}
-      onArchive={noop}
+      onDelete={noop}
       onUpload={async () => {}}
       onRemoveAttachment={noop}
       onDerive={noop}
