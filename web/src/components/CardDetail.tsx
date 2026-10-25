@@ -1,7 +1,8 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Markdown } from './Markdown.tsx';
 import { Attachments } from './Attachments.tsx';
 import { RelatedCards } from './RelatedCards.tsx';
+import { lazyView } from '../lib/lazyView.tsx';
 import { ACCENT, FOLDER_TONE, clockTime, cx, labelTone, relativeTime } from '../lib/ui.ts';
 import { hasPrintableContent, openPrintView } from '../lib/print.tsx';
 import {
@@ -23,7 +24,7 @@ import {
   type TaskType,
 } from '../lib/types.ts';
 
-const SessionFeed = lazy(() => import('./SessionFeed.tsx').then((m) => ({ default: m.SessionFeed })));
+const SessionFeed = lazyView(() => import('./SessionFeed.tsx').then((m) => m.SessionFeed));
 
 type Tab = 'description' | 'plan' | 'result' | 'session' | 'related' | 'files' | 'activity' | 'chat';
 
@@ -53,6 +54,7 @@ export function CardDetail({
   agents = [],
   onManageAgents,
   workers = [],
+  embedded = false,
 }: {
   task: Task;
   projectId: string;
@@ -90,6 +92,11 @@ export function CardDetail({
   onManageAgents?: () => void;
   /** Named workers waiting on this board right now, offered in the worker picker. */
   workers?: WaitingWorker[];
+  /**
+   * Render as a panel inside another view (the Relations map) rather than as
+   * the drawer over the board. The host then owns Esc and the backdrop.
+   */
+  embedded?: boolean;
 }) {
   const waiting = pendingQuestion(task);
   const running = task.column === 'in-progress';
@@ -107,10 +114,11 @@ export function CardDetail({
   );
 
   useEffect(() => {
+    if (embedded) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, embedded]);
 
   const tabs = useMemo(
     () =>
@@ -129,11 +137,14 @@ export function CardDetail({
     [task.plan, task.result, task.session, task.sessionHistory.length, running, task.related, referencedBy, task.attachments.length, task.activity.length, task.messages.length, waiting],
   );
 
-  return (
-    <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true">
-      <div className="pk-scrim absolute inset-0" onClick={onClose} />
-
-      <aside className="pk-drawer relative flex h-full w-full max-w-[580px] flex-col border-l border-white/[0.07] bg-[var(--color-surface-1)]">
+  const panel = (
+      <aside
+        className={cx(
+          'relative flex h-full w-full flex-col bg-[var(--color-surface-1)]',
+          embedded ? 'min-w-0' : 'pk-drawer max-w-[580px] border-l border-white/[0.07]',
+        )}
+        aria-label={embedded ? `Card #${task.number}` : undefined}
+      >
         <header className="border-b border-[var(--color-line)] px-5 py-4">
           <div className="flex items-start gap-3">
             <span className="mt-1 font-mono text-[11px] text-zinc-600">#{task.number}</span>
@@ -305,6 +316,13 @@ export function CardDetail({
           </button>
         </footer>
       </aside>
+  );
+
+  if (embedded) return panel;
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true">
+      <div className="pk-scrim absolute inset-0" onClick={onClose} />
+      {panel}
     </div>
   );
 }

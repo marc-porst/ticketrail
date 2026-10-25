@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -18,6 +18,7 @@ import { useBoard } from './lib/useBoard.ts';
 import { useProjects, useSelectedProject } from './lib/useProjects.ts';
 import { ProjectPicker } from './components/ProjectPicker.tsx';
 import { Settings } from './components/Settings.tsx';
+import { lazyView } from './lib/lazyView.tsx';
 import { WorkerIndicator } from './components/WorkerIndicator.tsx';
 import { LinkConfirm } from './components/LinkConfirm.tsx';
 import { setConfirmLink, shouldConfirmLink } from './lib/confirmLink.ts';
@@ -39,11 +40,12 @@ import {
 import { FolderDragFace } from './components/FolderGroup.tsx';
 import { cx, labelTone } from './lib/ui.ts';
 import { matchesSearch, searchTerms } from './lib/search.ts';
-import { pendingQuestion, type Column, type AgentSummary, type NotificationSettings, type SkillSummary, type Task } from './lib/types.ts';
+import { MAX_RELATED, pendingQuestion, type Column, type AgentSummary, type NotificationSettings, type SkillSummary, type Task } from './lib/types.ts';
 
 // The skills view brings a syntax highlighter; load it only when it is opened.
-const SkillsModal = lazy(() => import('./components/SkillsModal.tsx').then((m) => ({ default: m.SkillsModal })));
-const AgentsModal = lazy(() => import('./components/AgentsModal.tsx').then((m) => ({ default: m.AgentsModal })));
+const SkillsModal = lazyView(() => import('./components/SkillsModal.tsx').then((m) => m.SkillsModal));
+const AgentsModal = lazyView(() => import('./components/AgentsModal.tsx').then((m) => m.AgentsModal));
+const RelationsModal = lazyView(() => import('./components/RelationsModal.tsx').then((m) => m.RelationsModal));
 
 export default function App() {
   const { projects, defaultId, refresh } = useProjects();
@@ -84,6 +86,7 @@ export default function App() {
   const onSkillsChanged = useCallback((list: SkillSummary[]) => setSkillCount(list.length), []);
 
   const [agentsOpen, setAgentsOpen] = useState(false);
+  const [relationsOpen, setRelationsOpen] = useState(false);
   /** The open space's agents: the header count and the card's agent picker. */
   const [agents, setAgents] = useState<AgentSummary[]>([]);
 
@@ -188,6 +191,11 @@ export default function App() {
   }, [snapshot?.tasks]);
 
   const open = snapshot?.tasks.find((t) => t.id === openId) ?? null;
+  /** Links between cards on the board, for the Relations button. */
+  const linkCount = useMemo(() => {
+    const ids = new Set((snapshot?.tasks ?? []).map((t) => t.id));
+    return (snapshot?.tasks ?? []).reduce((n, t) => n + (t.related ?? []).filter((r) => ids.has(r)).length, 0);
+  }, [snapshot?.tasks]);
   const active = snapshot?.tasks.find((t) => t.id === activeId) ?? null;
   const blocked = (snapshot?.tasks ?? []).filter((t) => pendingQuestion(t)).length;
   useEffect(() => {
@@ -288,6 +296,43 @@ export default function App() {
   const [confirmLinks, setConfirmLinks] = useState(() => shouldConfirmLink());
   const link = (targetId: string, related: string[]) =>
     void run(() => api!.patch(targetId, { related }).then((t) => (refresh(), t)));
+
+  /** A card's detail: the drawer over the board, or a panel inside the Relations view. */
+  const cardDetail = (
+    task: Task,
+    { onClose, onOpenCard, embedded = false }: { onClose: () => void; onOpenCard: (id: string) => void; embedded?: boolean },
+  ) => (
+    <CardDetail
+      key={task.id}
+      task={task}
+      projectId={selected!}
+      embedded={embedded}
+      onClose={onClose}
+      onPatch={(changes) => void run(() => api!.patch(task.id, changes).then((t) => (refresh(), t)))}
+      onReply={(text) => void run(() => api!.reply(task.id, text).then((t) => (refresh(), t)))}
+      onUpload={async (files) => {
+        for (const file of files) await run(() => api!.upload(task.id, file));
+      }}
+      onRemoveAttachment={(fileId) => void run(() => api!.removeAttachment(task.id, fileId))}
+      onDerive={() => void run(() => api!.derive(task.id).then((t) => (refresh(), t)))}
+      labelSuggestions={allLabels}
+      allTasks={snapshot?.tasks ?? []}
+      onOpenCard={onOpenCard}
+      folders={folders}
+      onCreateFolder={(name) => run(() => api!.createFolder(name))}
+      agents={agents}
+      workers={snapshot?.workers?.workers ?? []}
+      onManageAgents={() => {
+        onClose();
+        setRelationsOpen(false);
+        setAgentsOpen(true);
+      }}
+      onArchive={() => {
+        onClose();
+        void run(() => api!.archive(task.id).then((t) => (refresh(), t)));
+      }}
+    />
+  );
 
   const onDragEnd = (event: DragEndEvent) => {
     if (activeFolder) {
@@ -447,6 +492,15 @@ export default function App() {
           >
             Agents
             {agents.length ? <span className="pk-num ml-1.5 rounded bg-white/[0.06] px-1 font-mono text-[10px] text-zinc-400">{agents.length}</span> : null}
+          </button>
+          <button
+            onClick={() => setRelationsOpen(true)}
+            aria-label={linkCount ? `Relations · ${linkCount}` : 'Relations'}
+            className="pk-press inline-flex items-center rounded-lg px-2.5 py-1.5 font-medium hover:bg-white/[0.06] hover:text-zinc-100"
+            title="Every card and how they are linked; draw new links between cards"
+          >
+            Relations
+            {linkCount ? <span className="pk-num ml-1.5 rounded bg-white/[0.06] px-1 font-mono text-[10px] text-zinc-400">{linkCount}</span> : null}
           </button>
           <button
             onClick={() => setFoldersOpen(true)}
@@ -633,6 +687,39 @@ export default function App() {
         />
       )}
 
+      {relationsOpen && api && selected && snapshot && (
+        <Suspense fallback={null}>
+          <RelationsModal
+            key={selected}
+            projectId={selected}
+            tasks={snapshot.tasks}
+            onClose={() => setRelationsOpen(false)}
+            onCreate={async (title) => {
+              const task = await run(() => api!.create({ title, column: 'backlog' }));
+              refresh();
+              return task;
+            }}
+            renderCard={(id, close, openOther) => {
+              const task = snapshot.tasks.find((t) => t.id === id);
+              return task ? cardDetail(task, { onClose: close, onOpenCard: openOther, embedded: true }) : null;
+            }}
+            onLink={(from, to) => {
+              const card = snapshot.tasks.find((t) => t.id === from);
+              if (!card) return 'That card is gone.';
+              if ((card.related ?? []).includes(to)) return 'These cards are already linked.';
+              const related = linkOnDrop(card, to);
+              if (!related) return `#${card.number} already links ${MAX_RELATED} cards, the most one card can have.`;
+              link(from, related);
+              return null;
+            }}
+            onUnlink={(from, to) => {
+              const card = snapshot.tasks.find((t) => t.id === from);
+              if (card) link(from, (card.related ?? []).filter((id) => id !== to));
+            }}
+          />
+        </Suspense>
+      )}
+
       {agentsOpen && api && (
         <Suspense fallback={null}>
           <AgentsModal key={selected} api={api} onClose={() => setAgentsOpen(false)} onChanged={setAgents} />
@@ -650,34 +737,7 @@ export default function App() {
       )}
 
       {open && (
-        <CardDetail
-          key={open.id}
-          task={open}
-          projectId={selected!}
-          onClose={() => setOpenId(null)}
-          onPatch={(changes) => void run(() => api!.patch(open.id, changes).then((t) => (refresh(), t)))}
-          onReply={(text) => void run(() => api!.reply(open.id, text).then((t) => (refresh(), t)))}
-          onUpload={async (files) => {
-            for (const file of files) await run(() => api!.upload(open.id, file));
-          }}
-          onRemoveAttachment={(fileId) => void run(() => api!.removeAttachment(open.id, fileId))}
-          onDerive={() => void run(() => api!.derive(open.id).then((t) => (refresh(), t)))}
-          labelSuggestions={allLabels}
-          allTasks={snapshot.tasks}
-          onOpenCard={setOpenId}
-          folders={folders}
-          onCreateFolder={(name) => run(() => api!.createFolder(name))}
-          agents={agents}
-          workers={snapshot.workers?.workers ?? []}
-          onManageAgents={() => {
-            setOpenId(null);
-            setAgentsOpen(true);
-          }}
-          onArchive={() => {
-            setOpenId(null);
-            void run(() => api!.archive(open.id).then((t) => (refresh(), t)));
-          }}
-        />
+        cardDetail(open, { onClose: () => setOpenId(null), onOpenCard: setOpenId })
       )}
     </div>
   );

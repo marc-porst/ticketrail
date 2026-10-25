@@ -154,7 +154,9 @@ The earlier result is kept further down, so nothing gets lost.
 - 🏷️ **Labels:** little coloured tags such as `design` or `mobile`. Click one at the top to show
   only those cards.
 - 🔗 **Related cards:** drop a card onto another card to say "read this one too". Handy for a bug
-  that belongs to an earlier feature.
+  that belongs to an earlier feature. **Relations** at the top shows every card and the arrows
+  between them; draw a line from one card to another to link them, and press **Tidy up** to
+  sort the picture.
 - 🖥️ **Session:** every card keeps what Claude did on it, step by step, run by run. Open the
   card's **Session** tab to watch live or look back later.
 - 🔔 **Alerts:** the ⚙️ menu can play a sound or show a notification when a card moves, so you
@@ -598,6 +600,36 @@ ticketrail relate <id> #12 #14     # link, by id or #number
 ticketrail unrelate <id> #12       # unlink
 ticketrail add "Fix margins" --related 15
 ```
+
+### The Relations view
+
+**Relations** in the top bar (with the number of links) opens a map of every card on the board.
+Each card shows its lane, type and number. A solid arrow means "reads as context": it runs straight
+from the card that holds the link to the card it reads. A dashed violet arrow points from a card to the
+investigation it was derived from.
+
+- **See everything at once.** The map opens zoomed so every card and arrow fits the window. Zoom
+  with **−** and **+**, Ctrl/⌘ + scroll, or click the percentage to fit again.
+- **New card:** use **+ New card**, double-click empty space, or drop a link you are drawing on
+  empty space. A small title field appears in that spot; Enter creates the card in Backlog (Esc
+  or an empty title cancels). A card made from a dropped link is already linked: the card you
+  dragged from reads it.
+- **Move** a card by dragging it. The card you moved last stays on top.
+- **Link** two cards by hovering a card and dragging from the blue dot on its right edge onto
+  another card. The card you start from reads the other one, the same as dropping it on the board.
+- **Unlink** by hovering a link and clicking the trash button that appears on it. A click on the
+  link itself does nothing, so a link is never removed by accident.
+- **Open** a card by clicking it. It opens in a panel on the right of the view, with everything the
+  card drawer has (editing, chat, files, Session). The map stays open beside it and marks that card.
+  A related card clicked inside the panel replaces it there. Esc closes the panel first, then the view.
+- **Tidy up** lays the map out again: each group of linked cards in columns from left to right, in
+  an order that keeps arrows from crossing, biggest group first, and cards without links in a grid
+  underneath. It fits the layout to the window: a long chain wraps onto the next band like a line
+  of text, at whichever width shows the whole map largest. A board opened here for the first time
+  starts out tidied the same way.
+
+Hovering a card highlights its links and dims the rest. Where the cards sit is remembered in this
+browser only, per project; the links themselves are stored on the cards like any other.
 
 ## Folders
 
