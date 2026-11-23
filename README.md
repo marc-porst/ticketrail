@@ -273,6 +273,11 @@ in Terminal), paste the line you copied, and press <kbd>Enter</kbd>. Claude star
 Claude now says it's waiting for cards. Leave this window open, too. ☕ Back on the board, the
 dot at the top right turns green and reads **worker ready**.
 
+> 💡 **The very first time** in a space, Claude may say it has *installed the Ticketrail hooks*
+> and asks you to restart it. Those are small helpers that send its questions to the board instead
+> of the Terminal. When it fits, close the window, open a new one and do step 5 again. You only do
+> this once per space.
+
 **Step 6: done!** Pick the new space in the project menu and write your first card. Each space
 needs its own Claude window (step 5); the board itself serves all of them.
 
@@ -436,6 +441,15 @@ off <b>Keep session history</b> in Settings ⚙️.
 </details>
 
 <details>
+<summary><b>The card says "waiting in the terminal". What do I do?</b></summary>
+
+Claude is stuck on something only its Terminal window can answer, usually a question like
+<i>"Do you want to allow this command?"</i>. Switch to the Claude window for this space, answer
+there, and the card moves back to <i>In Progress</i> by itself. Questions with choices never end up
+there: they show up on the card as buttons.
+</details>
+
+<details>
 <summary><b>The dot at the top right is red or grey.</b></summary>
 
 Red (<i>offline</i>) means the page can't reach the board server. Reload the page, and if that
@@ -476,6 +490,8 @@ ticketrail init
 That is a shell command — run it in a terminal, or as `! ticketrail init` inside a Claude
 Code session. It creates `.ticketrail/` for the board data and installs the skill plus the
 `/ticketrail-start`, `/ticketrail-work` and `/ticketrail-add` commands into that project's `.claude/`.
+It also adds the Claude Code hooks that bring questions and terminal waits onto the card to
+`.claude/settings.local.json` (per machine, not committed); see [Working a card](#working-a-card).
 
 Now open Claude Code there. The first time, run `/reload-skills` so it picks up the new
 commands, then:
@@ -487,6 +503,11 @@ commands, then:
 
 `/ticketrail-work` blocks on the board and takes a card the moment you drag one into **Plan** or
 **Implement**. Wrap it in `/loop /ticketrail-work` to leave it running unattended.
+
+**After updating Ticketrail**, run `ticketrail init --force` in each project. Plain `init` only adds
+what is missing, so the skill and commands in `.claude/` would stay at the old version; `--force`
+rewrites them (local edits to those files are lost). Then restart the worker sessions: Claude Code
+reads skills and hooks when a session starts.
 
 ## Several projects, one board
 
@@ -939,6 +960,9 @@ folder add "name" [--color]              create a folder  (rename, color, remove
 file <id> <folder|none>                  put a card in a folder, or take it out
 status                                   human-readable summary
 projects [add|remove <path>]             boards the switcher offers
+
+hook <pre-tool|notify|resume>            the Claude Code hooks; reads the hook JSON on stdin.
+                                         Installed by init and next, not run by hand
 ```
 
 Text arguments accept `--text "..."`, `--file <path>`, or `--file -` for stdin.
@@ -974,6 +998,10 @@ that same lock, so two worker sessions never get the same one.
 Each card's Session tab data lives in two places. The card file holds a pointer: `session` (the
 current run's transcript and byte range) and `sessionHistory` (earlier runs). The saved copies of
 the runs' entries are in `.ticketrail/sessions/<card>/<run>.json`. See [The Session tab](#the-session-tab).
+
+A chat message can carry a question's `options` (with `multiSelect`, `header`, and `group` for
+questions asked together), and an answer the `choices` picked. A card held up by its worker's
+terminal has a `waiting` note (`kind`, `text`, `at`), which only lasts while it sits on User Input.
 
 Commit `.ticketrail/tasks/` — the board is part of the project. `.locks/`, `.runtime/` and
 `sessions/` are ignored; the session copies can contain anything a command printed.
