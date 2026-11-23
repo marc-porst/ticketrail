@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../src/core/store.ts';
 import { needsUser, normalizeTask, pendingQuestion } from '../src/core/task.ts';
 import { parseOptions } from '../src/cli/commands/work.ts';
-import { runHook, waitKind } from '../src/cli/commands/hook.ts';
+import { runHook, toolKey, waitKind, type PermissionOutput, type PreToolOutput } from '../src/cli/commands/hook.ts';
+import { spawnSync } from 'node:child_process';
 import { HOOKS_FILE, cliCommand, ensureHooks, hookCli, installHooks, nodeCommand } from '../src/core/board-init.ts';
 
 let root: string;
@@ -162,16 +163,35 @@ describe('hooks', () => {
     });
     const out = await runHook(store, 'pre-tool', { session_id: 's1', tool_name: 'AskUserQuestion', tool_input: askInput }, { timeoutMs: 5000 });
     stop();
-    expect(out!.hookSpecificOutput.permissionDecision).toBe('deny');
-    expect(out!.hookSpecificOutput.permissionDecisionReason).toContain('"Which database?" → SQLite');
+    const hook = (out as PreToolOutput).hookSpecificOutput;
+    expect(hook.permissionDecision).toBe('allow');
+    expect(hook.updatedInput).toEqual({ ...askInput, answers: { 'Which database?': 'SQLite' } });
     expect(store.get(card.id)!.column).toBe('in-progress');
   });
 
-  it('tells Claude to move on when nobody answers', async () => {
+  it('leaves the question to the terminal when nobody answers on the board', async () => {
     const card = claimed('s1');
     const out = await runHook(store, 'pre-tool', { session_id: 's1', tool_name: 'AskUserQuestion', tool_input: askInput }, { timeoutMs: 300 });
-    expect(out!.hookSpecificOutput.permissionDecisionReason).toMatch(/Nobody answered/);
-    expect(store.get(card.id)!.column).toBe('user-input');
+    expect(out).toBeNull();
+    const after = store.get(card.id)!;
+    expect(pendingQuestion(after)).toBeNull();
+    expect(after.column).toBe('in-progress');
+  });
+
+  it('lets go when the terminal answers first', async () => {
+    const card = claimed('s1');
+    const stop = answerWhenAsked(card.id, () =>
+      // the user picked an option in the terminal: the tool ran
+      void runHook(store, 'resume', { session_id: 's1', hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion', tool_input: { ...askInput, answers: {} } }),
+    );
+    const out = await runHook(store, 'pre-tool', { session_id: 's1', tool_name: 'AskUserQuestion', tool_input: askInput }, { timeoutMs: 5000 });
+    stop();
+    expect(out).toBeNull();
+    const after = store.get(card.id)!;
+    expect(after.column).toBe('in-progress');
+    expect(after.messages[0].withdrawn).toBeTruthy();
+    // a late click on the card is refused, not lost
+    expect(() => store.message(card.id, 'Postgres', 'user', { answers: after.messages[0].id, choices: ['Postgres'] })).toThrow(/not open/);
   });
 
   it('stops waiting when the user pulls the card away', async () => {
@@ -179,7 +199,7 @@ describe('hooks', () => {
     const stop = answerWhenAsked(card.id, (s) => s.move(card.id, 'backlog'));
     const out = await runHook(store, 'pre-tool', { session_id: 's1', tool_name: 'AskUserQuestion', tool_input: askInput }, { timeoutMs: 5000 });
     stop();
-    expect(out!.hookSpecificOutput.permissionDecisionReason).toMatch(/moved card #\d+ away/);
+    expect((out as PreToolOutput).hookSpecificOutput.permissionDecisionReason).toMatch(/moved card #\d+ away/);
   });
 
   it('leaves sessions without a card alone', async () => {
@@ -198,7 +218,68 @@ describe('hooks', () => {
     });
     const out = await runHook(store, 'pre-tool', { session_id: 's1', tool_name: 'ExitPlanMode', tool_input: { plan: '1. Do the thing' } }, { timeoutMs: 5000 });
     stop();
-    expect(out!.hookSpecificOutput.permissionDecision).toBe('allow');
+    expect((out as PreToolOutput).hookSpecificOutput).toMatchObject({ permissionDecision: 'allow', updatedInput: { plan: '1. Do the thing' } });
+  });
+
+  const bash = { command: 'rm -rf build', description: 'Clean the build folder' };
+
+  it('asks a permission on the card and allows it from there', async () => {
+    const card = claimed('s1');
+    const stop = answerWhenAsked(card.id, (s) => {
+      const q = pendingQuestion(s.get(card.id)!)!;
+      expect(q).toMatchObject({ header: 'Permission', source: 'terminal' });
+      expect(q.text).toContain('rm -rf build');
+      s.message(card.id, 'Allow', 'user', { answers: q.id, choices: ['Allow'] });
+    });
+    const out = await runHook(store, 'permission', { session_id: 's1', tool_name: 'Bash', tool_input: bash }, { timeoutMs: 5000 });
+    stop();
+    expect(out).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
+    expect(store.get(card.id)!.column).toBe('in-progress');
+  });
+
+  it('denies a permission without stopping Claude, passing on what the user wrote', async () => {
+    const card = claimed('s1');
+    const stop = answerWhenAsked(card.id, (s) => {
+      const q = pendingQuestion(s.get(card.id)!)!;
+      s.message(card.id, 'Only delete build/tmp', 'user', { answers: q.id });
+    });
+    const out = (await runHook(store, 'permission', { session_id: 's1', tool_name: 'Bash', tool_input: bash }, { timeoutMs: 5000 })) as PermissionOutput;
+    stop();
+    expect(out.hookSpecificOutput.decision).toMatchObject({ behavior: 'deny', interrupt: false });
+    expect((out.hookSpecificOutput.decision as any).message).toContain('Only delete build/tmp');
+  });
+
+  it('takes the permission off the card once the terminal granted it', async () => {
+    const card = claimed('s1');
+    const stop = answerWhenAsked(card.id, () =>
+      void runHook(store, 'resume', { session_id: 's1', hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: bash }),
+    );
+    const out = await runHook(store, 'permission', { session_id: 's1', tool_name: 'Bash', tool_input: bash }, { timeoutMs: 5000 });
+    stop();
+    expect(out).toBeNull();
+    expect(store.get(card.id)!.column).toBe('in-progress');
+  });
+
+  it('a different tool finishing does not settle the permission', async () => {
+    const card = claimed('s1');
+    store.askAll(card.id, [{ text: 'Allow?', options: ['Allow', 'Deny'] }], { source: 'terminal', tool: toolKey('Bash', bash), pid: process.pid });
+    await runHook(store, 'resume', { session_id: 's1', hook_event_name: 'PostToolUse', tool_name: 'Read', tool_input: { file_path: '/a' } });
+    expect(pendingQuestion(store.get(card.id)!)).not.toBeNull();
+    // a new prompt typed in the terminal settles everything the terminal asked
+    await runHook(store, 'resume', { session_id: 's1', hook_event_name: 'UserPromptSubmit' });
+    expect(pendingQuestion(store.get(card.id)!)).toBeNull();
+    expect(store.get(card.id)!.column).toBe('in-progress');
+  });
+
+  it('clears a question whose hook is gone once Claude sits idle, and says it waits in the terminal', async () => {
+    const card = claimed('s1');
+    const dead = spawnSync(process.execPath, ['-e', '0']).pid!;
+    store.askAll(card.id, [{ text: 'Allow?', options: ['Allow', 'Deny'] }], { source: 'terminal', tool: 'x', pid: dead });
+    await runHook(store, 'notify', { session_id: 's1', notification_type: 'idle_prompt' });
+    const after = store.get(card.id)!;
+    expect(pendingQuestion(after)).toBeNull();
+    expect(after.column).toBe('user-input');
+    expect(after.waiting).toMatchObject({ kind: 'idle' });
   });
 
   it('marks a permission prompt and clears it on resume', async () => {
@@ -244,6 +325,7 @@ describe('installing the hooks', () => {
     expect(settings.hooks.Notification).toEqual([{ hooks: [{ type: 'command', command: 'node /new/dist/cli.js hook notify' }] }]);
     expect(settings.hooks.PreToolUse[0]).toMatchObject({ matcher: 'AskUserQuestion|ExitPlanMode' });
     expect(settings.hooks.PreToolUse[0].hooks[0].timeout).toBeGreaterThanOrEqual(3600);
+    expect(settings.hooks.PermissionRequest[0].hooks[0]).toMatchObject({ command: 'node /new/dist/cli.js hook permission' });
 
     expect(installHooks(root, 'node /new/dist/cli.js')).toBe('unchanged');
   });

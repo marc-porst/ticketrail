@@ -29,7 +29,7 @@ const QUESTION_HOOK_TIMEOUT_S = 3600;
 
 /** A hook command this package wrote, whatever path it was written with. */
 function isOurs(command: unknown): boolean {
-  return typeof command === 'string' && /ticketrail|cli\.js/.test(command) && /\bhook (pre-tool|notify|resume)\b/.test(command);
+  return typeof command === 'string' && /ticketrail|cli\.js/.test(command) && /\bhook (pre-tool|permission|notify|resume)\b/.test(command);
 }
 
 /** The hooks a board needs, keyed by Claude Code event. */
@@ -37,6 +37,7 @@ function hookEntries(cli: string): Record<string, any[]> {
   const run = (event: string, extra: Record<string, unknown> = {}) => ({ type: 'command', command: `${cli} hook ${event}`, ...extra });
   return {
     PreToolUse: [{ matcher: 'AskUserQuestion|ExitPlanMode', hooks: [run('pre-tool', { timeout: QUESTION_HOOK_TIMEOUT_S })] }],
+    PermissionRequest: [{ matcher: '*', hooks: [run('permission', { timeout: QUESTION_HOOK_TIMEOUT_S })] }],
     Notification: [{ hooks: [run('notify')] }],
     PostToolUse: [{ matcher: '*', hooks: [run('resume')] }],
     UserPromptSubmit: [{ hooks: [run('resume')] }],

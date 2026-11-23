@@ -103,8 +103,11 @@ Open the card, type your answer in the **Chat**, and press **Send**. That's it. 
 it and carries on by itself. When Claude offers choices, they show up as buttons, right on the
 card and in the chat: one click answers.
 
-If Claude is stuck in its terminal on something only the terminal can answer, like a
-permission prompt, the card moves to **User Input** too and says so, so you know where to look.
+When Claude needs your permission, say to run a command, the card asks you too: **Allow** or
+**Deny**. Deny on the card, and Claude skips that step and carries on with the card. Write a reason
+instead of pressing Deny, and Claude reads it. You can still answer in the terminal; whichever you
+answer first counts, and the card catches up. A **No** typed in the terminal stops Claude, though,
+until you tell it there what to do next. The card then says it is waiting in the terminal.
 
 ### Watching the work ⚡
 
@@ -443,10 +446,10 @@ off <b>Keep session history</b> in Settings ⚙️.
 <details>
 <summary><b>The card says "waiting in the terminal". What do I do?</b></summary>
 
-Claude is stuck on something only its Terminal window can answer, usually a question like
-<i>"Do you want to allow this command?"</i>. Switch to the Claude window for this space, answer
-there, and the card moves back to <i>In Progress</i> by itself. Questions with choices never end up
-there: they show up on the card as buttons.
+Claude stopped in its Terminal window and is waiting for you to type there. That happens when
+you answered <b>No</b> to a permission in the terminal, which stops Claude's turn. Switch to the
+Claude window for this space, tell it how to carry on, and the card moves back to <i>In Progress</i>
+by itself. To say no without stopping Claude, press <b>Deny</b> on the card instead.
 </details>
 
 <details>
@@ -578,10 +581,14 @@ and carries on. You never have to switch to the terminal.
 A question can come with choices (`ask <id> "..." --option A --option B`), which the board shows
 as buttons on the card face and in the chat. Claude Code's own question picker
 (`AskUserQuestion`) and plan-mode approval are caught by a hook that `ticketrail init` installs
-into `.claude/settings.local.json`: the question lands on the card instead of the terminal, and
-the answer goes back to Claude. The same hooks notice a permission prompt or a turn that ended
-mid-card, move the card to **User Input** with a "waiting in the terminal" note, and move it back
-once Claude carries on.
+into `.claude/settings.local.json`: the question lands on the card, and the answer goes back to
+Claude as the tool's result. Permission prompts (`PermissionRequest`) land on the card as
+**Allow** / **Deny**; a deny tells Claude why and lets it carry on (`interrupt: false`), where a
+"No" in the terminal ends its turn. The terminal can still answer while the card asks: the hook
+takes the question off the card when the tool runs (`PostToolUse`), the user types a prompt
+(`UserPromptSubmit`), or the hook itself is ended, so no button is left that nothing listens to.
+A turn that ended mid-card (`idle_prompt`) moves the card to **User Input** with a "waiting in the
+terminal" note, and it moves back once Claude carries on.
 
 The hooks are written per machine and point at the installed CLI by its absolute path, so they
 work however Ticketrail is installed (from a checkout, as a project dependency, or globally).

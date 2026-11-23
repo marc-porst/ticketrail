@@ -145,6 +145,17 @@ function readJson<T>(file: string): T | null {
   }
 }
 
+/** Whether a hook process is still running. A question without one counts as gone. */
+function alive(pid: number | undefined): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
 export class Store {
   readonly root: string;
   readonly paths: Paths;
@@ -764,7 +775,7 @@ export class Store {
       const question =
         role === 'user'
           ? opts.answers
-            ? t.messages.find((m) => m.id === opts.answers && m.role === 'claude' && m.needsAnswer && !m.answeredBy) ??
+            ? t.messages.find((m) => m.id === opts.answers && m.role === 'claude' && m.needsAnswer && !m.answeredBy && !m.withdrawn) ??
               null
             : pendingQuestion(t)
           : null;
@@ -808,7 +819,7 @@ export class Store {
   askAll(
     id: string,
     questions: (QuestionInput & { text: string })[],
-    source?: 'terminal',
+    from?: { source: 'terminal'; tool?: string; pid?: number },
   ): { task: Task; messages: Message[] } {
     if (!questions.length) throw new Error('Nothing to ask');
     const created: Message[] = [];
@@ -827,7 +838,9 @@ export class Store {
           ...(options.length && q.multiSelect ? { multiSelect: true } : {}),
           ...(header ? { header } : {}),
           ...(group ? { group } : {}),
-          ...(source ? { source } : {}),
+          ...(from ? { source: from.source } : {}),
+          ...(from?.tool ? { tool: from.tool } : {}),
+          ...(from?.pid ? { pid: from.pid } : {}),
         };
         t.messages.push(message);
         created.push(message);
@@ -884,17 +897,51 @@ export class Store {
     });
   }
 
-  /** The session moved again: a card it held for the terminal goes back to In Progress. */
-  resume(sessionId: string): Task | null {
+  /**
+   * The session moved again: a card it held for the terminal goes back to In
+   * Progress. With `settled`, terminal questions the terminal answered first
+   * are taken off the card too: the ones for that tool call (`tool`), or all
+   * of them (`'all'`, e.g. the user typed a new prompt in the terminal), or
+   * those whose hook is gone (`'orphaned'`): nothing can deliver their answer.
+   */
+  resume(sessionId: string, settled?: { tool: string } | 'all' | 'orphaned'): Task | null {
     const card = this.cardOfSession(sessionId);
-    if (!card?.waiting) return null;
+    if (!card) return null;
+    const matches = (m: Message) =>
+      m.source === 'terminal' &&
+      m.role === 'claude' &&
+      m.needsAnswer &&
+      !m.answeredBy &&
+      !m.withdrawn &&
+      (settled === 'all' ||
+        (settled === 'orphaned' && !alive(m.pid)) ||
+        (typeof settled === 'object' && m.tool === settled.tool));
+    if (!card.waiting && !card.messages.some(matches)) return null;
     return this.update(card.id, (t) => {
-      if (!t.waiting) return false;
+      const stale = settled ? t.messages.filter(matches) : [];
+      if (!t.waiting && !stale.length) return false;
       t.waiting = null;
+      for (const m of stale) m.withdrawn = 'Answered in the terminal.';
+      if (stale.length) t.activity.push(this.status('Answered in the terminal.'));
       if (t.column === 'user-input' && !pendingQuestion(t)) {
         t.column = t.returnColumn ?? 'in-progress';
         t.returnColumn = null;
         t.activity.push(this.status('Back to work.'));
+      }
+    });
+  }
+
+  /** Take questions off a card that no longer need an answer here (the terminal settled them). */
+  withdraw(id: string, ids: string[], reason = 'Answered in the terminal.'): Task | null {
+    if (!this.get(id)) return null;
+    return this.update(id, (t) => {
+      const stale = t.messages.filter((m) => ids.includes(m.id) && m.needsAnswer && !m.answeredBy && !m.withdrawn);
+      if (!stale.length) return false;
+      for (const m of stale) m.withdrawn = reason;
+      t.activity.push(this.status(reason));
+      if (t.column === 'user-input' && !pendingQuestion(t) && !t.waiting) {
+        t.column = t.returnColumn ?? 'in-progress';
+        t.returnColumn = null;
       }
     });
   }

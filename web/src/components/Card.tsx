@@ -8,9 +8,12 @@ export function CardFace({
   dragging,
   referencedBy = 0,
   compact = false,
+  attached = false,
 }: {
   task: Task;
   dragging?: boolean;
+  /** Answer buttons follow right under the face, inside the same frame. */
+  attached?: boolean;
   /** How many other cards link this one as related. */
   referencedBy?: number;
   /** One row per card: title, number and the cues that need you. */
@@ -58,7 +61,8 @@ export function CardFace({
   return (
     <div
       className={cx(
-        'pk-card relative overflow-hidden rounded-[10px] border px-3 pt-2.5 pb-2 text-left',
+        'pk-card relative overflow-hidden border px-3 pt-2.5 pb-2 text-left',
+        attached ? 'pk-card-attached rounded-t-[10px] border-b-0' : 'rounded-[10px]',
         waiting ? 'border-amber-400/40' : live ? 'border-emerald-400/25' : 'border-white/[0.06]',
         dragging ? 'pk-card-dragging rotate-[1.5deg] scale-[1.02]' : 'hover:border-white/[0.12]',
       )}
@@ -223,20 +227,23 @@ export function Card({
           </span>
         </div>
       )}
-      <button
-        ref={mergeRefs(draggable.setNodeRef)}
-        {...draggable.listeners}
-        {...draggable.attributes}
-        onClick={() => onOpen(task)}
-        className={cx('block w-full cursor-grab touch-none rounded-[10px] active:cursor-grabbing', draggable.isDragging && 'opacity-30')}
-      >
-        <CardFace task={task} referencedBy={referencedBy} compact={compact} />
-      </button>
-      {quick && (
-        <div className="mt-1 px-0.5">
-          <QuestionOptions question={quick} compact onAnswer={(_text, [label]) => onAnswer!(task, quick, label)} />
-        </div>
-      )}
+      {/* the answer buttons sit inside the card's frame; they cannot live in the drag button itself */}
+      <div className={cx('rounded-[10px]', draggable.isDragging && 'opacity-30')}>
+        <button
+          ref={mergeRefs(draggable.setNodeRef)}
+          {...draggable.listeners}
+          {...draggable.attributes}
+          onClick={() => onOpen(task)}
+          className="block w-full cursor-grab touch-none rounded-[10px] active:cursor-grabbing"
+        >
+          <CardFace task={task} referencedBy={referencedBy} compact={compact} attached={Boolean(quick)} />
+        </button>
+        {quick && (
+          <div className="-mt-px rounded-b-[10px] border border-t-0 border-amber-400/40 bg-[var(--color-surface-2)] px-3 pt-0.5 pb-2">
+            <QuestionOptions question={quick} compact onAnswer={(_text, [label]) => onAnswer!(task, quick, label)} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
