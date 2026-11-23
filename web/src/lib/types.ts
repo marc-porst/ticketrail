@@ -5,6 +5,8 @@ export type {
   Column,
   Message,
   Mode,
+  QuestionOption,
+  TerminalWait,
   PastResult,
   PastSession,
   Task,
@@ -23,6 +25,7 @@ export {
   TASK_TYPES,
   TYPE_LABELS,
   isReadOnlyType,
+  needsUser,
   normalizeTask,
   pendingQuestion,
 } from '../../../src/core/task.ts';

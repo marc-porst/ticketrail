@@ -21,6 +21,7 @@ import {
   statusCommand,
 } from './commands/board.ts';
 import { projectsCommand } from './commands/projects.ts';
+import { hookCommand } from './commands/hook.ts';
 import { attachCommand, detachCommand, filesCommand } from './commands/attach.ts';
 import {
   askCommand,
@@ -46,6 +47,8 @@ Working the board (this is what /ticketrail-work uses):
   check <id>                       has the user pulled this card back?          -> JSON
   log <id> "text" [--kind]         append to the card's activity feed
   ask <id> "question" [--wait]     park on User Input, block for the answer     -> JSON
+    [--option "A" --option "B|what B means"] [--multi] [--header "Topic"]
+    the board shows the options as buttons; the answer adds "choices"
   plan <id> --file <plan.md>       store the plan, move to Planned
   done <id> --file <summary.md>    store the result, move to Done
   fail <id> "reason"               stop and hand the card back to the user
@@ -70,6 +73,8 @@ Everyday:
   send <id> <worker|none>                  only that named worker may claim the card
   status                                   human-readable summary
   projects [add|remove <path>]             boards the switcher offers
+  hook <pre-tool|notify|resume>            Claude Code hooks (installed by init): questions and
+                                           terminal waits in a worker session show up on the card
 
 Text arguments accept --text "...", --file <path>, or --file - for stdin.
 In a linked git worktree the CLI uses the main checkout's board, so parallel
@@ -79,6 +84,9 @@ The model behind each status change is recorded on the card. It is read from the
 Claude Code session; pass --model <id> to say so yourself, or set recordModel to
 false in .ticketrail/config.json to record nothing.
 `;
+
+/** Commands a worker runs on the card it holds. */
+const WORKER_COMMANDS = new Set(['check', 'log', 'ask', 'plan', 'done', 'fail', 'attach', 'files', 'detach', 'show']);
 
 async function main(): Promise<void> {
   const [, , command = 'help', ...rest] = process.argv;
@@ -96,6 +104,8 @@ async function main(): Promise<void> {
   if (command === 'init') return initCommand(args);
   // works from anywhere: it is about every board, not the one you are standing in
   if (command === 'projects') return projectsCommand(args, positional);
+  // runs inside every Claude Code session of the project, so it finds its own board and never fails
+  if (command === 'hook') return hookCommand(args, positional);
 
   const store = new Store(requireRoot());
   // Which model is running is worth recording on the card, but it is the
@@ -103,6 +113,10 @@ async function main(): Promise<void> {
   if (store.config().recordModel !== false) store.model = resolveModel(flagString(args, 'model'));
   // The Session tab reads the worker's own transcript; `liveSession: false` keeps it out.
   if (store.config().liveSession !== false) store.session = currentSession();
+  // A worker running a command is not stuck in its terminal, whatever a hook last said.
+  if (WORKER_COMMANDS.has(command) && process.env.CLAUDE_CODE_SESSION_ID) {
+    store.resume(process.env.CLAUDE_CODE_SESSION_ID);
+  }
 
   switch (command) {
     case 'serve': return serveCommand(store, args);

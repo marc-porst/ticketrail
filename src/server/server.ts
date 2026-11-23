@@ -438,7 +438,14 @@ export async function startServer(store: Store, options: { port?: number; host?:
       if (typeof body.text !== 'string' || !body.text.trim()) {
         return sendJson(res, 400, { error: 'A message needs text' });
       }
-      const { task } = s.message(params.id, body.text.trim(), body.role === 'claude' ? 'claude' : 'user');
+      const role = body.role === 'claude' ? 'claude' : 'user';
+      const { task } = s.message(params.id, body.text.trim(), role, {
+        // the question a click on one of its options answers, and which options were picked
+        ...(role === 'user' && typeof body.answers === 'string' ? { answers: body.answers } : {}),
+        ...(role === 'user' && Array.isArray(body.choices)
+          ? { choices: body.choices.filter((c: unknown): c is string => typeof c === 'string') }
+          : {}),
+      });
       sendJson(res, 201, task);
     }),
   );

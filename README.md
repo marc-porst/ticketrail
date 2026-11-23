@@ -100,7 +100,11 @@ yellow, and a badge at the top of the board says **"1 waiting on you"**.
 </p>
 
 Open the card, type your answer in the **Chat**, and press **Send**. That's it. Claude reads
-it and carries on by itself.
+it and carries on by itself. When Claude offers choices, they show up as buttons, right on the
+card and in the chat: one click answers.
+
+If Claude is stuck in its terminal on something only the terminal can answer, like a
+permission prompt, the card moves to **User Input** too and says so, so you know where to look.
 
 ### Watching the work ⚡
 
@@ -550,6 +554,22 @@ right now, and a chat thread. When Claude needs a decision it asks in the thread
 moves to **User Input** — you answer in the card, and the blocked worker picks the answer up
 and carries on. You never have to switch to the terminal.
 
+A question can come with choices (`ask <id> "..." --option A --option B`), which the board shows
+as buttons on the card face and in the chat. Claude Code's own question picker
+(`AskUserQuestion`) and plan-mode approval are caught by a hook that `ticketrail init` installs
+into `.claude/settings.local.json`: the question lands on the card instead of the terminal, and
+the answer goes back to Claude. The same hooks notice a permission prompt or a turn that ended
+mid-card, move the card to **User Input** with a "waiting in the terminal" note, and move it back
+once Claude carries on.
+
+The hooks are written per machine and point at the installed CLI by its absolute path, so they
+work however Ticketrail is installed (from a checkout, as a project dependency, or globally).
+`ticketrail init` installs them, and a worker installs them itself on its first `next` where they
+are missing, including a fresh git worktree. Claude Code loads hooks when a session starts, so a
+worker that just installed them says so, and they apply once you restart it. Moved or reinstalled
+Ticketrail? The next `next` or `init` repoints them. Set `"hooks": false` in
+`.ticketrail/config.json` to never install them.
+
 ## Card types
 
 A card can carry a type — Feature, Bug, Investigation, or Question — set from the dropdown in
@@ -899,6 +919,7 @@ wait [--timeout 0]               block until Plan/Implement has a card; never cl
 check <id>                       has the user pulled this card back?          -> JSON
 log <id> "text" [--kind]         append to the card's activity feed
 ask <id> "question" [--wait]     park on User Input, block for the answer     -> JSON
+  [--option "A" --option "B|what B means"] [--multi] [--header "Topic"]   choices shown as buttons
 plan <id> --file <plan.md>       store the plan, move to Planned
 done <id> --file <summary.md>    store the result, move to Done
 fail <id> "reason"               stop and hand the card back to the user

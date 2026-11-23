@@ -9,6 +9,7 @@ import { relatedContext, withPaths } from './attach.ts';
 import { agentExists, readAgent } from '../../core/agents.ts';
 import { describeFilter, isEmptyFilter, matchesFilter, parseFilter, type WorkFilter } from '../../core/filter.ts';
 import { findWorktree } from '../../core/paths.ts';
+import { ensureHooks } from '../../core/board-init.ts';
 import { describeNews, hasNews, markSeen, unseenNews } from '../../core/news.ts';
 
 /**
@@ -136,6 +137,20 @@ function claimWorkable(store: Store, spec: WorkerSpec): Task | null {
 
 /** Claim the top card of the highest-priority queue, blocking until one shows up. */
 export async function nextCommand(store: Store, args: Args): Promise<void> {
+  // a worker on a new machine or worktree gets the hooks on its first claim
+  const hooks = ensureHooks(store);
+  const say = (out: Record<string, unknown>) =>
+    printJson(
+      hooks
+        ? {
+            ...out,
+            hooksNote:
+              `Ticketrail just installed its Claude Code hooks into ${hooks}. They take effect in the next ` +
+              'Claude Code session: tell the user to restart this worker session when convenient, so questions ' +
+              'and permission prompts show up on the board.',
+          }
+        : out,
+    );
   const spec = workerSpec(store, args);
   touchWorker(store);
   let task: Task | null;
@@ -150,18 +165,18 @@ export async function nextCommand(store: Store, args: Args): Promise<void> {
       stop();
     }
     touchWorker(store);
-    if (got === 'updated') return printJson({ status: 'none', reason: 'updated', note: UPDATED_NOTE });
+    if (got === 'updated') return say({ status: 'none', reason: 'updated', note: UPDATED_NOTE });
     task = got;
   } else {
     task = claimWorkable(store, spec);
   }
 
-  if (!task) return printJson({ status: 'none' });
+  if (!task) return say({ status: 'none' });
   const related = relatedContext(store, task);
   const folder = task.folder ? store.findFolder(task.folder) : null;
   const agent = task.agent ? readAgent(store.root, task.agent) : null;
   const worktree = findWorktree();
-  printJson({
+  say({
     status: 'claimed',
     mode: task.mode,
     type: task.type,
@@ -260,9 +275,15 @@ export function logCommand(store: Store, args: Args, positional: string[]): void
 export async function askCommand(store: Store, args: Args, positional: string[]): Promise<void> {
   const [id, ...rest] = positional;
   const question = textInput(args, rest);
-  if (!id || !question) throw new Error('Usage: ticketrail ask <id> "your question" [--wait]');
+  if (!id || !question) {
+    throw new Error('Usage: ticketrail ask <id> "your question" [--option "A" --option "B|what B means"] [--multi] [--wait]');
+  }
 
-  const { message } = store.ask(id, question);
+  const { message } = store.ask(id, question, {
+    options: parseOptions(flagList(args, 'option')),
+    multiSelect: flagBool(args, 'multi'),
+    header: flagString(args, 'header'),
+  });
 
   if (!flagBool(args, 'wait')) {
     return printJson({ status: 'asked', questionId: message.id, task: store.get(id) });
@@ -295,7 +316,22 @@ export async function askCommand(store: Store, args: Args, positional: string[])
         'Nobody answered yet. The card stays in User Input — stop working on it and tell the user you are waiting.',
     });
   }
-  printJson({ status: 'answered', answer: result.answer.text, task: result.task });
+  printJson({
+    status: 'answered',
+    answer: result.answer.text,
+    ...(result.answer.choices?.length ? { choices: result.answer.choices } : {}),
+    task: result.task,
+  });
+}
+
+/** `--option "Label"` or `--option "Label|what it means"`. */
+export function parseOptions(values: string[]): { label: string; description?: string }[] {
+  return values.map((value) => {
+    const bar = value.indexOf('|');
+    if (bar === -1) return { label: value };
+    const description = value.slice(bar + 1).trim();
+    return description ? { label: value.slice(0, bar), description } : { label: value.slice(0, bar) };
+  });
 }
 
 export function planCommand(store: Store, args: Args, positional: string[]): void {

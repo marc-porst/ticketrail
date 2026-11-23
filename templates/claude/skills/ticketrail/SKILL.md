@@ -35,6 +35,7 @@ only through the commands below.
 {{pk}} check <id>           # has the user pulled the card back? -> JSON
 {{pk}} log <id> "text"      # append to the card's activity feed  [--kind info|file|test|error]
 {{pk}} ask <id> "q" --wait  # park on User Input and block for the answer -> JSON
+                            #   [--option "A" --option "B|what B means"] [--multi] [--header "Topic"]
 {{pk}} plan <id> --file p   # store the plan, card -> Planned
 {{pk}} done <id> --file p   # store the result, card -> Done
 {{pk}} fail <id> "reason"   # stop and hand the card back to the user
@@ -157,7 +158,20 @@ asks. When you create a follow-up card, you can give it the same folder:
 `{{pk}} add "title" --folder "<name>"`.
 
 
-## Attachments
+## Hooks
+
+`ticketrail init` installs Claude Code hooks into `.claude/settings.local.json`, and `next`
+installs them where they are missing (a new machine, a fresh worktree). When `next` returns a
+`hooksNote`, tell the user once that the hooks apply from the next session and they should
+restart this worker when convenient. The hooks only act on the card your session holds:
+
+- **AskUserQuestion / ExitPlanMode** are caught before the terminal shows them. The question
+  lands on the card with its options as buttons, and the tool is blocked with the user's answer
+  as the reason. Read that reason as the answer.
+- **A permission prompt, or a turn that ended mid-card,** moves the card to User Input with a
+  "waiting in the terminal" note, so the user knows to look. The card goes back to In Progress
+  as soon as you carry on.
+
 
 Cards can carry files — screenshots of a bug, a design, a log, a CSV. They live in
 `.ticketrail/files/` and are listed in `task.attachments`.
@@ -182,10 +196,16 @@ a screenshot of the feature you built, a failing test log:
    run, decisions made. The card's Session tab already streams your raw terminal; this feed
    is the short summary on top of it, and it lasts. A few entries per card, not one per tool
    call.
-3. **Ask instead of guessing.** When a decision is genuinely the user's, use
-   `ask <id> "..." --wait`. The card moves to User Input, the question appears in the card's
-   chat, and the command returns their answer. On `{"status":"pending"}` the wait timed out:
+3. **Ask instead of guessing, and ask on the board.** When a decision is genuinely the user's,
+   use `ask <id> "..." --wait`. The card moves to User Input, the question appears in the card's
+   chat, and the command returns their answer. When the answer is one of a few choices, pass
+   each as `--option` (`"Label"` or `"Label|what it means"`, add `--multi` if several may be
+   picked): the board shows them as buttons, and the answer adds `choices` with the labels picked.
+   The user may still answer in their own words. On `{"status":"pending"}` the wait timed out:
    stop working that card, say so, and move on.
+   **Never use AskUserQuestion or plan mode while you hold a card.** The user watches the board,
+   not your terminal. If you do, the Ticketrail hook moves the question to the card and gives you
+   the answer as the reason the tool was blocked; take that answer and carry on.
 4. **Never leave a card in In Progress.** Every claim ends in `plan`, `done`, or `fail`.
 5. **Check for cancellation** on long cards. If `check` says `cancelled`, the user dragged
    the card away — stop, and leave it where they put it.
