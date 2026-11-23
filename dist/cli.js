@@ -736,6 +736,9 @@ function normalizeRelated(values, selfId) {
   }
   return out;
 }
+var MAX_OPTIONS = 10;
+var MAX_OPTION_LABEL = 120;
+var MAX_OPTION_DESCRIPTION = 400;
 var MAX_RESULT_HISTORY = 20;
 var MAX_SESSION_HISTORY = 20;
 var RUN_ID = /^[A-Za-z0-9_-]{1,40}$/;
@@ -797,20 +800,56 @@ function normalizeTask(raw, fallbackId) {
       text: String(a?.text ?? ""),
       ...typeof a?.model === "string" && a.model ? { model: a.model } : {}
     })) : [],
-    messages: Array.isArray(raw?.messages) ? raw.messages.map((m, i) => ({
-      id: typeof m?.id === "string" ? m.id : `m${i}`,
-      at: typeof m?.at === "string" ? m.at : created,
-      role: m?.role === "user" ? "user" : "claude",
-      text: String(m?.text ?? ""),
-      ...m?.needsAnswer ? { needsAnswer: true } : {},
-      ...typeof m?.answeredBy === "string" ? { answeredBy: m.answeredBy } : {}
-    })) : [],
+    messages: Array.isArray(raw?.messages) ? raw.messages.map((m, i) => {
+      const options = normalizeOptions(m?.options);
+      const choices = Array.isArray(m?.choices) ? m.choices.filter((c) => typeof c === "string") : [];
+      return {
+        id: typeof m?.id === "string" ? m.id : `m${i}`,
+        at: typeof m?.at === "string" ? m.at : created,
+        role: m?.role === "user" ? "user" : "claude",
+        text: String(m?.text ?? ""),
+        ...m?.needsAnswer ? { needsAnswer: true } : {},
+        ...typeof m?.answeredBy === "string" ? { answeredBy: m.answeredBy } : {},
+        ...options.length ? { options } : {},
+        ...options.length && m?.multiSelect === true ? { multiSelect: true } : {},
+        ...typeof m?.header === "string" && m.header.trim() ? { header: m.header.trim().slice(0, 40) } : {},
+        ...typeof m?.group === "string" && m.group ? { group: m.group } : {},
+        ...m?.source === "terminal" ? { source: "terminal" } : {},
+        ...choices.length ? { choices } : {}
+      };
+    }) : [],
+    // only meaningful while the card sits on User Input; any move away ends it
+    waiting: isColumn(raw?.column) && raw.column === "user-input" ? normalizeWaiting(raw?.waiting, created) : null,
     createdAt: created,
     updatedAt: typeof raw?.updatedAt === "string" ? raw.updatedAt : created,
     startedAt: typeof raw?.startedAt === "string" ? raw.startedAt : null,
     finishedAt: typeof raw?.finishedAt === "string" ? raw.finishedAt : null,
     cancelRequested: raw?.cancelRequested === true,
     archived: raw?.archived === true
+  };
+}
+function normalizeOptions(values) {
+  if (!Array.isArray(values)) return [];
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of values) {
+    const source = typeof raw === "string" ? { label: raw } : raw;
+    const label = typeof source?.label === "string" ? source.label.trim().slice(0, MAX_OPTION_LABEL) : "";
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    const description = typeof source?.description === "string" ? source.description.trim().slice(0, MAX_OPTION_DESCRIPTION) : "";
+    out.push(description ? { label, description } : { label });
+    if (out.length === MAX_OPTIONS) break;
+  }
+  return out;
+}
+function normalizeWaiting(raw, fallbackAt) {
+  if (!raw || typeof raw !== "object") return null;
+  const kind = raw.kind === "permission" || raw.kind === "idle" ? raw.kind : "other";
+  return {
+    kind,
+    text: typeof raw.text === "string" ? raw.text : "",
+    at: typeof raw.at === "string" ? raw.at : fallbackAt
   };
 }
 function isOffset(value) {
@@ -832,12 +871,23 @@ function normalizeSession(raw) {
     saved: raw?.saved === true
   };
 }
+function isOpen(m) {
+  return m.role === "claude" && Boolean(m.needsAnswer) && !m.answeredBy;
+}
 function pendingQuestion(task) {
   for (let i = task.messages.length - 1; i >= 0; i--) {
     const m = task.messages[i];
-    if (m.role === "claude" && m.needsAnswer && !m.answeredBy) return m;
+    if (!isOpen(m)) continue;
+    if (!m.group) return m;
+    return task.messages.find((q) => q.group === m.group && isOpen(q)) ?? m;
   }
   return null;
+}
+function needsUser(task) {
+  return Boolean(task.waiting) || pendingQuestion(task) !== null;
+}
+function openInGroup(task, group) {
+  return task.messages.filter((m) => m.group === group && isOpen(m));
 }
 
 // src/core/store.ts
@@ -1166,6 +1216,7 @@ var Store = class _Store {
         attachments: [],
         activity: [],
         messages: [],
+        waiting: null,
         createdAt: timestamp,
         updatedAt: timestamp,
         startedAt: null,
@@ -1383,38 +1434,131 @@ var Store = class _Store {
       task.activity.push({ at: now(), kind, text });
     });
   }
-  message(id, text, role, needsAnswer = false) {
+  /**
+   * Add a chat message. A user message answers an open question: the one named
+   * by `answers`, else the one the card is waiting on. Once nothing it was
+   * asked together with is left open, the card goes back to where it was.
+   */
+  message(id, text, role, options = {}) {
+    const opts = typeof options === "boolean" ? { needsAnswer: options } : options;
     let created;
     const task = this.update(id, (t) => {
-      created = { id: makeId("m"), at: now(), role, text, ...needsAnswer ? { needsAnswer: true } : {} };
+      const question = role === "user" ? opts.answers ? t.messages.find((m) => m.id === opts.answers && m.role === "claude" && m.needsAnswer && !m.answeredBy) ?? null : pendingQuestion(t) : null;
+      if (role === "user" && opts.answers && !question) {
+        throw refuse(409, "That question is not open any more");
+      }
+      const labels = new Set((question?.options ?? []).map((o) => o.label));
+      const choices = (opts.choices ?? []).filter((c) => labels.has(c));
+      created = {
+        id: makeId("m"),
+        at: now(),
+        role,
+        text,
+        ...opts.needsAnswer ? { needsAnswer: true } : {},
+        ...choices.length ? { choices: question?.multiSelect ? choices : choices.slice(0, 1) } : {}
+      };
       t.messages.push(created);
-      if (role === "user") {
-        const question = pendingQuestion(t);
-        if (question) {
-          question.answeredBy = created.id;
-          if (t.column === "user-input") {
-            t.column = t.returnColumn ?? "in-progress";
-            t.returnColumn = null;
-            t.activity.push({ at: now(), kind: "status", text: "Answer received, back to Claude." });
-          }
-        }
+      if (!question) return;
+      question.answeredBy = created.id;
+      const rest = question.group ? openInGroup(t, question.group) : [];
+      if (t.column === "user-input" && !rest.length && !t.waiting) {
+        t.column = t.returnColumn ?? "in-progress";
+        t.returnColumn = null;
+        t.activity.push({ at: now(), kind: "status", text: "Answer received, back to Claude." });
       }
     });
     return { task, message: created };
   }
   /** Park a task on "User Input" with a blocking question. */
-  ask(id, question) {
-    let created;
+  ask(id, question, extra = {}) {
+    const { task, messages } = this.askAll(id, [{ ...extra, text: question }]);
+    return { task, message: messages[0] };
+  }
+  /**
+   * Park a task on "User Input" with one or more questions, asked together.
+   * With several, they share a group and the card waits until all are answered.
+   */
+  askAll(id, questions, source) {
+    if (!questions.length) throw new Error("Nothing to ask");
+    const created = [];
+    const group = questions.length > 1 ? makeId("g") : void 0;
     const task = this.update(id, (t) => {
-      created = { id: makeId("m"), at: now(), role: "claude", text: question, needsAnswer: true };
-      t.messages.push(created);
+      for (const q of questions) {
+        const options = normalizeOptions(q.options);
+        const header = q.header?.trim().slice(0, 40);
+        const message = {
+          id: makeId("m"),
+          at: now(),
+          role: "claude",
+          text: q.text,
+          needsAnswer: true,
+          ...options.length ? { options } : {},
+          ...options.length && q.multiSelect ? { multiSelect: true } : {},
+          ...header ? { header } : {},
+          ...group ? { group } : {},
+          ...source ? { source } : {}
+        };
+        t.messages.push(message);
+        created.push(message);
+      }
+      t.waiting = null;
       if (t.column !== "user-input") {
         t.returnColumn = t.column === "in-progress" ? "in-progress" : t.column;
         t.column = "user-input";
       }
-      t.activity.push(this.status("Waiting for your input."));
+      t.activity.push(this.status(questions.length > 1 ? `Waiting for your input (${questions.length} questions).` : "Waiting for your input."));
     });
-    return { task, message: created };
+    return { task, messages: created };
+  }
+  /**
+   * The card a Claude Code session is working right now, if any. A session
+   * that moved on from a card left waiting on a question still has that card
+   * open, so the one it is actually on wins: In Progress (or held for the
+   * terminal) first, then the most recently claimed.
+   */
+  cardOfSession(sessionId) {
+    if (!sessionId) return null;
+    const open3 = this.list().filter(
+      (t) => t.session?.id === sessionId && t.session.to === null && (t.column === "in-progress" || t.column === "user-input")
+    );
+    const active = (t) => t.column === "in-progress" || t.waiting ? 1 : 0;
+    open3.sort((a, b) => active(b) - active(a) || (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+    return open3[0] ?? null;
+  }
+  /**
+   * Claude stopped in its terminal on something the board cannot answer. The
+   * card moves to User Input so the user notices, and comes back on its own
+   * once the session moves again (`resume`).
+   */
+  markWaiting(id, wait) {
+    return this.update(id, (t) => {
+      if (t.column !== "in-progress" && !(t.column === "user-input" && t.waiting)) return false;
+      const fresh = !t.waiting;
+      t.waiting = { ...wait, at: now() };
+      if (t.column !== "user-input") {
+        t.returnColumn = "in-progress";
+        t.column = "user-input";
+      }
+      if (fresh) {
+        t.activity.push(
+          this.status(wait.kind === "permission" ? "Waiting in the terminal for a permission." : "Waiting in the terminal.")
+        );
+      }
+    });
+  }
+  /** The session moved again: a card it held for the terminal goes back to In Progress. */
+  resume(sessionId) {
+    const card = this.cardOfSession(sessionId);
+    if (!card?.waiting) return null;
+    return this.update(card.id, (t) => {
+      if (!t.waiting) return false;
+      t.waiting = null;
+      if (t.column === "user-input" && !pendingQuestion(t)) {
+        t.column = t.returnColumn ?? "in-progress";
+        t.returnColumn = null;
+        t.activity.push(this.status("Back to work."));
+      }
+    });
   }
   /**
    * Claim the top card of Implement, else Plan. A named worker passes its name,
@@ -1882,7 +2026,7 @@ function describeProject(record) {
     summary: {
       queued: tasks.filter((t) => QUEUE.includes(t.column)).length,
       inProgress: tasks.filter((t) => t.column === "in-progress").length,
-      blocked: tasks.filter((t) => pendingQuestion(t)).length,
+      blocked: tasks.filter((t) => needsUser(t)).length,
       done: tasks.filter((t) => t.column === "done").length,
       total: tasks.length
     },
@@ -1894,6 +2038,49 @@ function describeProjects() {
 }
 
 // src/core/board-init.ts
+var HOOKS_FILE = path9.join(".claude", "settings.local.json");
+var QUESTION_HOOK_TIMEOUT_S = 3600;
+function isOurs(command) {
+  return typeof command === "string" && /ticketrail|cli\.js/.test(command) && /\bhook (pre-tool|notify|resume)\b/.test(command);
+}
+function hookEntries(cli) {
+  const run2 = (event, extra = {}) => ({ type: "command", command: `${cli} hook ${event}`, ...extra });
+  return {
+    PreToolUse: [{ matcher: "AskUserQuestion|ExitPlanMode", hooks: [run2("pre-tool", { timeout: QUESTION_HOOK_TIMEOUT_S })] }],
+    Notification: [{ hooks: [run2("notify")] }],
+    PostToolUse: [{ matcher: "*", hooks: [run2("resume")] }],
+    UserPromptSubmit: [{ hooks: [run2("resume")] }]
+  };
+}
+function installHooks(root, cli = hookCli()) {
+  if (!cli) return "skipped";
+  const file = path9.join(root, HOOKS_FILE);
+  let settings = {};
+  let before = "";
+  if (fs8.existsSync(file)) {
+    before = fs8.readFileSync(file, "utf8");
+    try {
+      settings = before.trim() ? JSON.parse(before) : {};
+    } catch {
+      return "skipped";
+    }
+    if (!settings || typeof settings !== "object" || Array.isArray(settings)) return "skipped";
+  }
+  const hooks = settings.hooks && typeof settings.hooks === "object" && !Array.isArray(settings.hooks) ? settings.hooks : {};
+  for (const [event, entries] of Object.entries(hookEntries(cli))) {
+    const kept = (Array.isArray(hooks[event]) ? hooks[event] : []).map(
+      (group) => Array.isArray(group?.hooks) ? { ...group, hooks: group.hooks.filter((h) => !isOurs(h?.command)) } : group
+    ).filter((group) => !Array.isArray(group?.hooks) || group.hooks.length > 0);
+    hooks[event] = [...kept, ...entries];
+  }
+  settings.hooks = hooks;
+  const after = `${JSON.stringify(settings, null, 2)}
+`;
+  if (after === before) return "unchanged";
+  fs8.mkdirSync(path9.dirname(file), { recursive: true });
+  fs8.writeFileSync(file, after);
+  return "installed";
+}
 function templateRoot() {
   const here = path9.dirname(fileURLToPath(import.meta.url));
   const candidates = [
@@ -1909,11 +2096,62 @@ function templateRoot() {
   }
   return null;
 }
-function cliCommand() {
+function bundlePath() {
   const here = fileURLToPath(import.meta.url);
-  if (here.includes(`${path9.sep}node_modules${path9.sep}`)) return "npx ticketrail";
-  const bundle = path9.join(path9.dirname(here), "cli.js");
-  return fs8.existsSync(bundle) ? `node ${bundle}` : "npx ticketrail";
+  const candidates = [
+    here,
+    // running the bundle: this code is dist/cli.js
+    path9.join(path9.dirname(here), "..", "..", "dist", "cli.js")
+    // src/core/*.ts in a checkout
+  ];
+  for (const file of candidates) {
+    if (path9.basename(file) !== "cli.js" || !fs8.existsSync(file)) continue;
+    try {
+      return fs8.realpathSync(file);
+    } catch {
+      return path9.resolve(file);
+    }
+  }
+  return null;
+}
+function isInside(file, dir) {
+  let real = dir;
+  try {
+    real = fs8.realpathSync(dir);
+  } catch {
+  }
+  const rel = path9.relative(real, file);
+  return Boolean(rel) && !rel.startsWith("..") && !path9.isAbsolute(rel);
+}
+function cliCommand(root, bundle = bundlePath()) {
+  if (!bundle) return "npx ticketrail";
+  if (!bundle.includes(`${path9.sep}node_modules${path9.sep}`)) return `node ${bundle}`;
+  return root && !isInside(bundle, path9.join(root, "node_modules")) ? "ticketrail" : "npx ticketrail";
+}
+function hookCli() {
+  const bundle = bundlePath();
+  if (!bundle) return null;
+  return nodeCommand(bundle);
+}
+function nodeCommand(file) {
+  return `node ${/[\s"'$`\\]/.test(file) ? JSON.stringify(file) : file}`;
+}
+function ensureHooks(store, start = process.cwd()) {
+  if (!process.env.CLAUDE_CODE_SESSION_ID || store.config().hooks === false) return null;
+  const worktree = findWorktree(start);
+  const dir = worktree && samePath(worktree.main, store.root) ? worktree.path : store.root;
+  try {
+    return installHooks(dir) === "installed" ? path9.join(dir, HOOKS_FILE) : null;
+  } catch {
+    return null;
+  }
+}
+function samePath(a, b) {
+  try {
+    return fs8.realpathSync(a) === fs8.realpathSync(b);
+  } catch {
+    return path9.resolve(a) === path9.resolve(b);
+  }
 }
 function copyTree(from, to, force, written, root) {
   fs8.mkdirSync(to, { recursive: true });
@@ -1923,7 +2161,7 @@ function copyTree(from, to, force, written, root) {
     if (entry.isDirectory()) {
       copyTree(src, dest, force, written, root);
     } else if (force || !fs8.existsSync(dest)) {
-      const body = fs8.readFileSync(src, "utf8").replaceAll("{{pk}}", cliCommand());
+      const body = fs8.readFileSync(src, "utf8").replaceAll("{{pk}}", cliCommand(root));
       fs8.writeFileSync(dest, body);
       written.push(path9.relative(root, dest));
     }
@@ -1952,6 +2190,7 @@ function initBoard(root, options = {}) {
   const written = [];
   const templates = templateRoot();
   if (templates) copyTree(templates, path9.join(resolved, ".claude"), force, written, resolved);
+  const hooks = installHooks(resolved);
   patchGitignore(resolved);
   addProject(resolved);
   if (fresh && store.list().length === 0) {
@@ -1970,7 +2209,7 @@ function initBoard(root, options = {}) {
       ].join("\n")
     });
   }
-  return { root: resolved, name: store.projectName(), fresh, written, templatesMissing: !templates };
+  return { root: resolved, name: store.projectName(), fresh, written, templatesMissing: !templates, hooks };
 }
 
 // src/cli/commands/init.ts
@@ -1991,6 +2230,11 @@ function initCommand(args) {
     console.log(`  claude files ${result.written.join("\n               ")}`);
   } else if (!result.templatesMissing) {
     console.log(`  claude files already present (use --force to overwrite)`);
+  }
+  if (result.hooks === "installed") {
+    console.log(`  hooks        ${HOOKS_FILE}  (questions Claude asks in the terminal show up on the card)`);
+  } else if (result.hooks === "skipped") {
+    console.log(`  hooks        not installed: ${HOOKS_FILE} is not valid JSON, or there is no built CLI to point at`);
   }
   console.log(`
 Next: ticketrail serve   (or /ticketrail-start in Claude Code)`);
@@ -3377,7 +3621,12 @@ async function startServer(store, options = {}) {
       if (typeof body.text !== "string" || !body.text.trim()) {
         return sendJson(res, 400, { error: "A message needs text" });
       }
-      const { task } = s.message(params.id, body.text.trim(), body.role === "claude" ? "claude" : "user");
+      const role = body.role === "claude" ? "claude" : "user";
+      const { task } = s.message(params.id, body.text.trim(), role, {
+        // the question a click on one of its options answers, and which options were picked
+        ...role === "user" && typeof body.answers === "string" ? { answers: body.answers } : {},
+        ...role === "user" && Array.isArray(body.choices) ? { choices: body.choices.filter((c) => typeof c === "string") } : {}
+      });
       sendJson(res, 201, task);
     })
   );
@@ -3868,6 +4117,183 @@ function projectsCommand(args, positional) {
   }
 }
 
+// src/cli/commands/hook.ts
+var HOOK_EVENTS = ["pre-tool", "notify", "resume"];
+var HOOK_TIMEOUT_S = 3600;
+var DEFAULT_WAIT_S = HOOK_TIMEOUT_S - 60;
+var APPROVE = "Approve";
+var KEEP_PLANNING = "Keep planning";
+function decide(permissionDecision, permissionDecisionReason) {
+  return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision, permissionDecisionReason } };
+}
+async function awaitAnswers(store, taskId, asked, timeoutMs2) {
+  const ids = asked.map((m) => m.id);
+  const probe = () => {
+    const task = store.get(taskId);
+    if (!task) return { status: "cancelled", task: null };
+    const questions = ids.map((id) => task.messages.find((m) => m.id === id));
+    const answers = questions.map((q) => q?.answeredBy ? task.messages.find((m) => m.id === q.answeredBy) : void 0);
+    if (questions.every((q, i) => q && answers[i])) {
+      return { status: "answered", task, answers: questions.map((q, i) => ({ question: q, answer: answers[i] })) };
+    }
+    if (task.column !== "user-input") return { status: "cancelled", task };
+    return null;
+  };
+  touchWorker(store);
+  const stop = startHeartbeat(store);
+  try {
+    return await waitFor(store, probe, timeoutMs2) ?? { status: "timeout", task: store.get(taskId) };
+  } finally {
+    stop();
+    touchWorker(store);
+  }
+}
+function duration(ms) {
+  const minutes = Math.round(ms / 6e4);
+  if (minutes >= 1) return `${minutes} minute${minutes > 1 ? "s" : ""}`;
+  const seconds = Math.max(1, Math.round(ms / 1e3));
+  return `${seconds} second${seconds > 1 ? "s" : ""}`;
+}
+function notAnswered(outcome, card, timeoutMs2) {
+  if (outcome.status === "cancelled") {
+    const where = outcome.task ? `it is now in ${COLUMN_LABELS[outcome.task.column]}` : "it was deleted";
+    return `The user did not answer on the Ticketrail board: they moved card #${card.number} away from User Input (${where}). Do not ask again. Run \`ticketrail check ${card.id}\` and do what it says.`;
+  }
+  return `Nobody answered on the Ticketrail board within ${duration(timeoutMs2)}. The question stays on card #${card.number} in User Input. Stop working on this card, tell the user you are waiting for their answer there, and move on.`;
+}
+function answerText(answer) {
+  return answer.choices?.length ? answer.choices.join(", ") : answer.text;
+}
+async function askOnBoard(store, card, input, timeoutMs2) {
+  const questions = (Array.isArray(input?.questions) ? input.questions : []).filter((q) => typeof q?.question === "string" && q.question.trim()).map((q) => ({
+    text: q.question.trim(),
+    header: typeof q.header === "string" ? q.header : void 0,
+    options: Array.isArray(q.options) ? q.options : [],
+    multiSelect: q.multiSelect === true
+  }));
+  if (!questions.length) return null;
+  const { messages } = store.askAll(card.id, questions, "terminal");
+  const outcome = await awaitAnswers(store, card.id, messages, timeoutMs2);
+  if (outcome.status !== "answered") return decide("deny", notAnswered(outcome, card, timeoutMs2));
+  const lines = outcome.answers.map(({ question, answer }) => `- "${question.text}" \u2192 ${answerText(answer)}`);
+  return decide(
+    "deny",
+    [
+      `The user answered on the Ticketrail board (card #${card.number}), so the question was not shown in the terminal. Their answers:`,
+      ...lines,
+      `Carry on with these answers. Do not ask the same question again. Next time, ask with \`ticketrail ask ${card.id} "..." --option "..." --wait\`.`
+    ].join("\n")
+  );
+}
+async function approvePlanOnBoard(store, card, input, timeoutMs2) {
+  const plan = typeof input?.plan === "string" ? input.plan.trim() : "";
+  const { messages } = store.askAll(
+    card.id,
+    [
+      {
+        text: `Claude wants to leave plan mode and start working${plan ? " on this plan:\n\n" + plan : "."}`,
+        header: "Plan mode",
+        options: [
+          { label: APPROVE, description: "Leave plan mode and start" },
+          { label: KEEP_PLANNING, description: "Stay in plan mode; write what to change" }
+        ]
+      }
+    ],
+    "terminal"
+  );
+  const outcome = await awaitAnswers(store, card.id, messages, timeoutMs2);
+  if (outcome.status !== "answered") return decide("deny", notAnswered(outcome, card, timeoutMs2));
+  const answer = outcome.answers[0].answer;
+  const approved = answer.choices?.includes(APPROVE) || answer.text.trim().toLowerCase() === APPROVE.toLowerCase();
+  if (approved) return decide("allow", `The user approved the plan on the Ticketrail board (card #${card.number}).`);
+  return decide(
+    "deny",
+    `The user did not approve leaving plan mode on the Ticketrail board (card #${card.number}). Their answer: ${answerText(answer)}`
+  );
+}
+function waitKind(input) {
+  switch (input.notification_type) {
+    case "permission_prompt":
+      return "permission";
+    case "idle_prompt":
+      return "idle";
+    case "elicitation_dialog":
+      return "other";
+    case void 0:
+    case "":
+      break;
+    default:
+      return null;
+  }
+  const text = input.message ?? "";
+  if (/permission/i.test(text)) return "permission";
+  if (/waiting for your input/i.test(text)) return "idle";
+  return null;
+}
+var WAIT_TEXT = {
+  permission: "Claude needs your permission in the terminal.",
+  idle: "Claude stopped and is waiting for you in the terminal.",
+  other: "Claude is waiting for you in the terminal."
+};
+async function runHook(store, event, input, options = {}) {
+  const sessionId = input.session_id ?? "";
+  if (!sessionId) return null;
+  if (event === "resume") {
+    store.resume(sessionId);
+    return null;
+  }
+  const card = store.cardOfSession(sessionId);
+  if (!card) return null;
+  if (event === "notify") {
+    const kind = waitKind(input);
+    if (kind && !(card.column === "user-input" && !card.waiting)) {
+      store.markWaiting(card.id, { kind, text: input.message?.trim() || WAIT_TEXT[kind] });
+    }
+    return null;
+  }
+  store.resume(sessionId);
+  const fresh = store.get(card.id);
+  if (!fresh || fresh.column !== "in-progress") return null;
+  const timeoutMs2 = options.timeoutMs ?? DEFAULT_WAIT_S * 1e3;
+  if (input.tool_name === "AskUserQuestion") return askOnBoard(store, fresh, input.tool_input, timeoutMs2);
+  if (input.tool_name === "ExitPlanMode") return approvePlanOnBoard(store, fresh, input.tool_input, timeoutMs2);
+  return null;
+}
+function readStdin2() {
+  if (process.stdin.isTTY) return Promise.resolve("");
+  return new Promise((resolve) => {
+    const chunks = [];
+    process.stdin.on("data", (c) => chunks.push(c));
+    process.stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    process.stdin.on("error", () => resolve(""));
+  });
+}
+async function hookCommand(args, positional) {
+  const event = positional[0];
+  if (!HOOK_EVENTS.includes(event)) {
+    process.stderr.write(`Usage: ticketrail hook <${HOOK_EVENTS.join("|")}>  (reads the Claude Code hook JSON on stdin)
+`);
+    return;
+  }
+  try {
+    let input = {};
+    try {
+      input = JSON.parse(await readStdin2() || "{}");
+    } catch {
+      return;
+    }
+    const root = findRoot(input.cwd || process.cwd());
+    if (!root) return;
+    const seconds = flagNumber(args, "timeout", DEFAULT_WAIT_S);
+    const output = await runHook(new Store(root), event, input, { timeoutMs: Math.max(1, seconds) * 1e3 });
+    if (output) process.stdout.write(`${JSON.stringify(output)}
+`);
+  } catch (err) {
+    process.stderr.write(`ticketrail hook ${event}: ${err.message}
+`);
+  }
+}
+
 // src/cli/commands/work.ts
 import fs20 from "fs";
 
@@ -4049,6 +4475,13 @@ function claimWorkable(store, spec) {
   }
 }
 async function nextCommand(store, args) {
+  const hooks = ensureHooks(store);
+  const say = (out) => printJson(
+    hooks ? {
+      ...out,
+      hooksNote: `Ticketrail just installed its Claude Code hooks into ${hooks}. They take effect in the next Claude Code session: tell the user to restart this worker session when convenient, so questions and permission prompts show up on the board.`
+    } : out
+  );
   const spec = workerSpec(store, args);
   touchWorker(store);
   let task;
@@ -4062,17 +4495,17 @@ async function nextCommand(store, args) {
       stop();
     }
     touchWorker(store);
-    if (got === "updated") return printJson({ status: "none", reason: "updated", note: UPDATED_NOTE });
+    if (got === "updated") return say({ status: "none", reason: "updated", note: UPDATED_NOTE });
     task = got;
   } else {
     task = claimWorkable(store, spec);
   }
-  if (!task) return printJson({ status: "none" });
+  if (!task) return say({ status: "none" });
   const related = relatedContext(store, task);
   const folder = task.folder ? store.findFolder(task.folder) : null;
   const agent = task.agent ? readAgent(store.root, task.agent) : null;
   const worktree = findWorktree();
-  printJson({
+  say({
     status: "claimed",
     mode: task.mode,
     type: task.type,
@@ -4127,8 +4560,14 @@ ${describeNews(news)}`);
 async function askCommand(store, args, positional) {
   const [id, ...rest] = positional;
   const question = textInput(args, rest);
-  if (!id || !question) throw new Error('Usage: ticketrail ask <id> "your question" [--wait]');
-  const { message } = store.ask(id, question);
+  if (!id || !question) {
+    throw new Error('Usage: ticketrail ask <id> "your question" [--option "A" --option "B|what B means"] [--multi] [--wait]');
+  }
+  const { message } = store.ask(id, question, {
+    options: parseOptions(flagList(args, "option")),
+    multiSelect: flagBool(args, "multi"),
+    header: flagString(args, "header")
+  });
   if (!flagBool(args, "wait")) {
     return printJson({ status: "asked", questionId: message.id, task: store.get(id) });
   }
@@ -4157,7 +4596,20 @@ async function askCommand(store, args, positional) {
       guidance: "Nobody answered yet. The card stays in User Input \u2014 stop working on it and tell the user you are waiting."
     });
   }
-  printJson({ status: "answered", answer: result.answer.text, task: result.task });
+  printJson({
+    status: "answered",
+    answer: result.answer.text,
+    ...result.answer.choices?.length ? { choices: result.answer.choices } : {},
+    task: result.task
+  });
+}
+function parseOptions(values) {
+  return values.map((value) => {
+    const bar = value.indexOf("|");
+    if (bar === -1) return { label: value };
+    const description = value.slice(bar + 1).trim();
+    return description ? { label: value.slice(0, bar), description } : { label: value.slice(0, bar) };
+  });
 }
 function planCommand(store, args, positional) {
   const [id, ...rest] = positional;
@@ -4218,6 +4670,8 @@ Working the board (this is what /ticketrail-work uses):
   check <id>                       has the user pulled this card back?          -> JSON
   log <id> "text" [--kind]         append to the card's activity feed
   ask <id> "question" [--wait]     park on User Input, block for the answer     -> JSON
+    [--option "A" --option "B|what B means"] [--multi] [--header "Topic"]
+    the board shows the options as buttons; the answer adds "choices"
   plan <id> --file <plan.md>       store the plan, move to Planned
   done <id> --file <summary.md>    store the result, move to Done
   fail <id> "reason"               stop and hand the card back to the user
@@ -4242,6 +4696,8 @@ Everyday:
   send <id> <worker|none>                  only that named worker may claim the card
   status                                   human-readable summary
   projects [add|remove <path>]             boards the switcher offers
+  hook <pre-tool|notify|resume>            Claude Code hooks (installed by init): questions and
+                                           terminal waits in a worker session show up on the card
 
 Text arguments accept --text "...", --file <path>, or --file - for stdin.
 In a linked git worktree the CLI uses the main checkout's board, so parallel
@@ -4251,6 +4707,7 @@ The model behind each status change is recorded on the card. It is read from the
 Claude Code session; pass --model <id> to say so yourself, or set recordModel to
 false in .ticketrail/config.json to record nothing.
 `;
+var WORKER_COMMANDS = /* @__PURE__ */ new Set(["check", "log", "ask", "plan", "done", "fail", "attach", "files", "detach", "show"]);
 async function main() {
   const [, , command = "help", ...rest] = process.argv;
   const args = parseArgs(rest);
@@ -4265,9 +4722,13 @@ async function main() {
   }
   if (command === "init") return initCommand(args);
   if (command === "projects") return projectsCommand(args, positional);
+  if (command === "hook") return hookCommand(args, positional);
   const store = new Store(requireRoot());
   if (store.config().recordModel !== false) store.model = resolveModel(flagString(args, "model"));
   if (store.config().liveSession !== false) store.session = currentSession();
+  if (WORKER_COMMANDS.has(command) && process.env.CLAUDE_CODE_SESSION_ID) {
+    store.resume(process.env.CLAUDE_CODE_SESSION_ID);
+  }
   switch (command) {
     case "serve":
       return serveCommand(store, args);

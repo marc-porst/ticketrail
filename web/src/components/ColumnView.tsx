@@ -4,7 +4,7 @@ import { Card } from './Card.tsx';
 import { FolderGroup } from './FolderGroup.tsx';
 import { ACCENT, cx } from '../lib/ui.ts';
 import type { Collapsed } from '../lib/useCollapsed.ts';
-import { effectiveFolder, pendingQuestion, type ColumnMeta, type Folder, type Task } from '../lib/types.ts';
+import { effectiveFolder, needsUser, type ColumnMeta, type Folder, type Message, type Task } from '../lib/types.ts';
 
 export function ColumnView({
   meta,
@@ -19,6 +19,7 @@ export function ColumnView({
   compact = false,
   limit,
   onOpen,
+  onAnswer,
   onCreate,
 }: {
   meta: ColumnMeta;
@@ -39,6 +40,8 @@ export function ColumnView({
   /** Show only this many unfiled cards until the rest are asked for (the Done lane). */
   limit?: number;
   onOpen: (task: Task) => void;
+  /** A click on one of the options of the question a card is waiting on. */
+  onAnswer?: (task: Task, question: Message, label: string) => void;
   onCreate?: (title: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `col:${meta.id}`, data: { column: meta.id } });
@@ -61,6 +64,7 @@ export function ColumnView({
       key={task.id}
       task={task}
       onOpen={onOpen}
+      onAnswer={onAnswer}
       insertBefore={overCardId === task.id && overZone === 'before'}
       linkTarget={overCardId === task.id && overZone === 'link' && draggingId !== task.id}
       referencedBy={backlinks?.get(task.id)}
@@ -93,7 +97,7 @@ export function ColumnView({
   // Folded: a narrow rail that still takes drops and still shows what needs you.
   if (laneFolded) {
     const live = tasks.some((t) => t.column === 'in-progress');
-    const waiting = tasks.filter((t) => pendingQuestion(t)).length;
+    const waiting = tasks.filter((t) => needsUser(t)).length;
     return (
       <section
         ref={setNodeRef}

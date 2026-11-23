@@ -29,8 +29,10 @@ import {
   normalizeLabels,
   normalizeRelated,
   isWorkerName,
+  normalizeOptions,
   normalizeTask,
   now,
+  openInGroup,
   pendingQuestion,
   type ActivityEntry,
   type ActivityKind,
@@ -38,10 +40,19 @@ import {
   type Message,
   type Mode,
   type PastSession,
+  type QuestionOption,
   type Task,
   type TaskType,
+  type TerminalWait,
   TYPE_LABELS,
 } from './task.ts';
+
+/** What a question carries besides its text: the choices the board shows as buttons. */
+export interface QuestionInput {
+  options?: (QuestionOption | string)[];
+  multiSelect?: boolean;
+  header?: string;
+}
 
 /** Board-wide alert settings, shared by everyone who opens this board. */
 export interface NotificationSettings {
@@ -62,6 +73,8 @@ export interface BoardConfig {
   liveSession: boolean;
   /** Save a copy of each run's session in .ticketrail/sessions/ when it ends. */
   keepSessions: boolean;
+  /** false: never install the Claude Code hooks (questions and terminal waits on the card). */
+  hooks?: boolean;
 }
 
 export const DEFAULT_CONFIG: BoardConfig = {
@@ -466,6 +479,7 @@ export class Store {
         attachments: [],
         activity: [],
         messages: [],
+        waiting: null,
         createdAt: timestamp,
         updatedAt: timestamp,
         startedAt: null,
@@ -733,39 +747,156 @@ export class Store {
     });
   }
 
-  message(id: string, text: string, role: 'claude' | 'user', needsAnswer = false): { task: Task; message: Message } {
+  /**
+   * Add a chat message. A user message answers an open question: the one named
+   * by `answers`, else the one the card is waiting on. Once nothing it was
+   * asked together with is left open, the card goes back to where it was.
+   */
+  message(
+    id: string,
+    text: string,
+    role: 'claude' | 'user',
+    options: boolean | { needsAnswer?: boolean; answers?: string; choices?: string[] } = {},
+  ): { task: Task; message: Message } {
+    const opts = typeof options === 'boolean' ? { needsAnswer: options } : options;
     let created!: Message;
     const task = this.update(id, (t) => {
-      created = { id: makeId('m'), at: now(), role, text, ...(needsAnswer ? { needsAnswer: true } : {}) };
+      const question =
+        role === 'user'
+          ? opts.answers
+            ? t.messages.find((m) => m.id === opts.answers && m.role === 'claude' && m.needsAnswer && !m.answeredBy) ??
+              null
+            : pendingQuestion(t)
+          : null;
+      if (role === 'user' && opts.answers && !question) {
+        throw refuse(409, 'That question is not open any more');
+      }
+      const labels = new Set((question?.options ?? []).map((o) => o.label));
+      const choices = (opts.choices ?? []).filter((c) => labels.has(c));
+      created = {
+        id: makeId('m'),
+        at: now(),
+        role,
+        text,
+        ...(opts.needsAnswer ? { needsAnswer: true } : {}),
+        ...(choices.length ? { choices: question?.multiSelect ? choices : choices.slice(0, 1) } : {}),
+      };
       t.messages.push(created);
-      if (role === 'user') {
-        const question = pendingQuestion(t);
-        if (question) {
-          question.answeredBy = created.id;
-          if (t.column === 'user-input') {
-            t.column = t.returnColumn ?? 'in-progress';
-            t.returnColumn = null;
-            t.activity.push({ at: now(), kind: 'status', text: 'Answer received, back to Claude.' });
-          }
-        }
+      if (!question) return;
+      question.answeredBy = created.id;
+      const rest = question.group ? openInGroup(t, question.group) : [];
+      // a card held by the terminal stays put: the answer cannot reach Claude there
+      if (t.column === 'user-input' && !rest.length && !t.waiting) {
+        t.column = t.returnColumn ?? 'in-progress';
+        t.returnColumn = null;
+        t.activity.push({ at: now(), kind: 'status', text: 'Answer received, back to Claude.' });
       }
     });
     return { task, message: created };
   }
 
   /** Park a task on "User Input" with a blocking question. */
-  ask(id: string, question: string): { task: Task; message: Message } {
-    let created!: Message;
+  ask(id: string, question: string, extra: QuestionInput = {}): { task: Task; message: Message } {
+    const { task, messages } = this.askAll(id, [{ ...extra, text: question }]);
+    return { task, message: messages[0] };
+  }
+
+  /**
+   * Park a task on "User Input" with one or more questions, asked together.
+   * With several, they share a group and the card waits until all are answered.
+   */
+  askAll(
+    id: string,
+    questions: (QuestionInput & { text: string })[],
+    source?: 'terminal',
+  ): { task: Task; messages: Message[] } {
+    if (!questions.length) throw new Error('Nothing to ask');
+    const created: Message[] = [];
+    const group = questions.length > 1 ? makeId('g') : undefined;
     const task = this.update(id, (t) => {
-      created = { id: makeId('m'), at: now(), role: 'claude', text: question, needsAnswer: true };
-      t.messages.push(created);
+      for (const q of questions) {
+        const options = normalizeOptions(q.options);
+        const header = q.header?.trim().slice(0, 40);
+        const message: Message = {
+          id: makeId('m'),
+          at: now(),
+          role: 'claude',
+          text: q.text,
+          needsAnswer: true,
+          ...(options.length ? { options } : {}),
+          ...(options.length && q.multiSelect ? { multiSelect: true } : {}),
+          ...(header ? { header } : {}),
+          ...(group ? { group } : {}),
+          ...(source ? { source } : {}),
+        };
+        t.messages.push(message);
+        created.push(message);
+      }
+      // Claude is asking, so it is not stuck in the terminal any more
+      t.waiting = null;
       if (t.column !== 'user-input') {
         t.returnColumn = t.column === 'in-progress' ? 'in-progress' : t.column;
         t.column = 'user-input';
       }
-      t.activity.push(this.status('Waiting for your input.'));
+      t.activity.push(this.status(questions.length > 1 ? `Waiting for your input (${questions.length} questions).` : 'Waiting for your input.'));
     });
-    return { task, message: created };
+    return { task, messages: created };
+  }
+
+  /**
+   * The card a Claude Code session is working right now, if any. A session
+   * that moved on from a card left waiting on a question still has that card
+   * open, so the one it is actually on wins: In Progress (or held for the
+   * terminal) first, then the most recently claimed.
+   */
+  cardOfSession(sessionId: string): Task | null {
+    if (!sessionId) return null;
+    const open = this.list().filter(
+      (t) =>
+        t.session?.id === sessionId &&
+        t.session.to === null &&
+        (t.column === 'in-progress' || t.column === 'user-input'),
+    );
+    const active = (t: Task) => (t.column === 'in-progress' || t.waiting ? 1 : 0);
+    open.sort((a, b) => active(b) - active(a) || (b.startedAt ?? '').localeCompare(a.startedAt ?? ''));
+    return open[0] ?? null;
+  }
+
+  /**
+   * Claude stopped in its terminal on something the board cannot answer. The
+   * card moves to User Input so the user notices, and comes back on its own
+   * once the session moves again (`resume`).
+   */
+  markWaiting(id: string, wait: Omit<TerminalWait, 'at'>): Task {
+    return this.update(id, (t) => {
+      if (t.column !== 'in-progress' && !(t.column === 'user-input' && t.waiting)) return false;
+      const fresh = !t.waiting;
+      t.waiting = { ...wait, at: now() };
+      if (t.column !== 'user-input') {
+        t.returnColumn = 'in-progress';
+        t.column = 'user-input';
+      }
+      if (fresh) {
+        t.activity.push(
+          this.status(wait.kind === 'permission' ? 'Waiting in the terminal for a permission.' : 'Waiting in the terminal.'),
+        );
+      }
+    });
+  }
+
+  /** The session moved again: a card it held for the terminal goes back to In Progress. */
+  resume(sessionId: string): Task | null {
+    const card = this.cardOfSession(sessionId);
+    if (!card?.waiting) return null;
+    return this.update(card.id, (t) => {
+      if (!t.waiting) return false;
+      t.waiting = null;
+      if (t.column === 'user-input' && !pendingQuestion(t)) {
+        t.column = t.returnColumn ?? 'in-progress';
+        t.returnColumn = null;
+        t.activity.push(this.status('Back to work.'));
+      }
+    });
   }
 
   /**

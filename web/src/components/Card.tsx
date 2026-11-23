@@ -1,6 +1,7 @@
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { ACCENT, cx, labelTone, mergeRefs, relativeTime } from '../lib/ui.ts';
-import { pendingQuestion, TYPE_LABELS, type Task } from '../lib/types.ts';
+import { pendingQuestion, TYPE_LABELS, type Message, type Task } from '../lib/types.ts';
+import { QuestionOptions } from './QuestionOptions.tsx';
 
 export function CardFace({
   task,
@@ -16,7 +17,11 @@ export function CardFace({
   compact?: boolean;
 }) {
   const accent = ACCENT[task.column];
-  const waiting = pendingQuestion(task);
+  const question = pendingQuestion(task);
+  const terminal = task.waiting;
+  /** What the card is waiting on you for, as one line. */
+  const ask = terminal ? `In the terminal: ${terminal.text}` : question?.text ?? null;
+  const waiting = Boolean(question || terminal);
   const live = task.column === 'in-progress';
   const lastActivity = task.activity[task.activity.length - 1];
 
@@ -28,7 +33,7 @@ export function CardFace({
           waiting ? 'border-amber-400/40' : live ? 'border-emerald-400/25' : 'border-white/[0.06]',
           dragging ? 'pk-card-dragging rotate-[1.5deg] scale-[1.02]' : 'hover:border-white/[0.12]',
         )}
-        title={waiting ? `${task.title}\n\nWaiting on you: ${waiting.text}` : task.title}
+        title={waiting ? `${task.title}\n\nWaiting on you: ${ask}` : task.title}
       >
         {(live || waiting) && (
           <span
@@ -45,7 +50,7 @@ export function CardFace({
           ))}
           <span className="shrink-0 font-mono text-[10px] text-zinc-600">#{task.number}</span>
         </div>
-        {waiting && <p className="mt-1 truncate text-[11px] text-amber-100/80">{waiting.text}</p>}
+        {waiting && <p className="mt-1 truncate text-[11px] text-amber-100/80">{ask}</p>}
       </div>
     );
   }
@@ -86,8 +91,21 @@ export function CardFace({
         <p className="mt-1.5 truncate text-[11px] text-emerald-300/75">{lastActivity.text}</p>
       )}
 
-      {waiting && (
-        <p className="mt-2 line-clamp-2 rounded-md bg-amber-400/[0.07] px-2 py-1.5 text-[11.5px] leading-snug text-amber-100/90">{waiting.text}</p>
+      {terminal ? (
+        <div className="mt-2 rounded-md bg-amber-400/[0.07] px-2 py-1.5 text-[11.5px] leading-snug text-amber-100/90">
+          <p className="flex items-center gap-1.5 font-medium text-amber-200">
+            <Glyph d="M2 3h12v10H2zM4.5 6.5L6.5 8l-2 1.5M8 10h3" />
+            {terminal.kind === 'permission' ? 'Needs your permission in the terminal' : 'Waiting for you in the terminal'}
+          </p>
+          {terminal.text && <p className="mt-0.5 line-clamp-2 text-amber-100/75">{terminal.text}</p>}
+        </div>
+      ) : (
+        question && (
+          <p className="mt-2 line-clamp-2 rounded-md bg-amber-400/[0.07] px-2 py-1.5 text-[11.5px] leading-snug text-amber-100/90">
+            {question.header && <span className="mr-1 font-medium text-amber-200">{question.header}:</span>}
+            {question.text}
+          </p>
+        )
       )}
 
       {task.labels.length > 0 && (
@@ -172,6 +190,7 @@ function Glyph({ d }: { d: string }) {
 export function Card({
   task,
   onOpen,
+  onAnswer,
   insertBefore,
   linkTarget = false,
   referencedBy,
@@ -179,6 +198,8 @@ export function Card({
 }: {
   task: Task;
   onOpen: (task: Task) => void;
+  /** Answer the question the card waits on with one of its options, without opening the card. */
+  onAnswer?: (task: Task, question: Message, label: string) => void;
   insertBefore: boolean;
   /** A dragged card is over this card's link zone. */
   linkTarget?: boolean;
@@ -187,6 +208,10 @@ export function Card({
 }) {
   const draggable = useDraggable({ id: `card:${task.id}`, data: { taskId: task.id } });
   const droppable = useDroppable({ id: `card:${task.id}`, data: { taskId: task.id } });
+  // one click answers a single-choice question; a multiple-choice one is answered in the card
+  const question = pendingQuestion(task);
+  const quick =
+    onAnswer && !compact && !task.waiting && question?.options?.length && !question.multiSelect ? question : null;
 
   return (
     <div ref={droppable.setNodeRef} className="pk-rise relative">
@@ -207,6 +232,11 @@ export function Card({
       >
         <CardFace task={task} referencedBy={referencedBy} compact={compact} />
       </button>
+      {quick && (
+        <div className="mt-1 px-0.5">
+          <QuestionOptions question={quick} compact onAnswer={(_text, [label]) => onAnswer!(task, quick, label)} />
+        </div>
+      )}
     </div>
   );
 }

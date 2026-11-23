@@ -2,6 +2,7 @@ import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from '
 import { Markdown } from './Markdown.tsx';
 import { Attachments } from './Attachments.tsx';
 import { RelatedCards } from './RelatedCards.tsx';
+import { QuestionOptions } from './QuestionOptions.tsx';
 import { lazyView } from '../lib/lazyView.tsx';
 import { ACCENT, FOLDER_TONE, clockTime, cx, labelTone, relativeTime } from '../lib/ui.ts';
 import { hasPrintableContent, openPrintView } from '../lib/print.tsx';
@@ -22,6 +23,7 @@ import {
   type PastResult,
   type Task,
   type TaskType,
+  type TerminalWait,
 } from '../lib/types.ts';
 
 const SessionFeed = lazyView(() => import('./SessionFeed.tsx').then((m) => m.SessionFeed));
@@ -73,7 +75,7 @@ export function CardDetail({
       column: Column;
     }>,
   ) => void;
-  onReply: (text: string) => void;
+  onReply: ReplyFn;
   /** Asks first (unless told not to), then deletes the card. */
   onDelete: () => void;
   onUpload: (files: File[]) => Promise<void>;
@@ -103,7 +105,7 @@ export function CardDetail({
   const running = task.column === 'in-progress';
   const referencedBy = allTasks.filter((t) => (t.related ?? []).includes(task.id)).length;
   const [tab, setTab] = useState<Tab>(() =>
-    waiting
+    waiting || task.waiting
       ? 'chat'
       : running && task.session
         ? 'session'
@@ -846,10 +848,11 @@ function ActivityFeed({ task }: { task: Task }) {
   );
 }
 
-function Conversation({ task, onReply }: { task: Task; onReply: (text: string) => void }) {
+function Conversation({ task, onReply }: { task: Task; onReply: ReplyFn }) {
   const [draft, setDraft] = useState('');
   const bottom = useRef<HTMLDivElement>(null);
   const waiting = pendingQuestion(task);
+  const byId = new Map(task.messages.map((m) => [m.id, m]));
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: 'smooth' });
@@ -883,10 +886,31 @@ function Conversation({ task, onReply }: { task: Task; onReply: (text: string) =
                     : 'bg-[var(--color-surface-3)] text-zinc-200',
               )}
             >
-              <p className="mb-1 text-[10.5px] font-medium tracking-wide text-zinc-500 uppercase">
-                {message.role === 'user' ? 'You' : 'Claude'} · {clockTime(message.at)}
+              <p className="mb-1 flex flex-wrap items-center gap-1.5 text-[10.5px] font-medium tracking-wide text-zinc-500 uppercase">
+                <span>
+                  {message.role === 'user' ? 'You' : 'Claude'} · {clockTime(message.at)}
+                </span>
+                {message.header && (
+                  <span className="rounded bg-amber-400/10 px-1.5 py-px tracking-normal text-amber-200/90 normal-case">
+                    {message.header}
+                  </span>
+                )}
+                {message.source === 'terminal' && (
+                  <span className="tracking-normal text-zinc-500 normal-case" title="Claude asked this in its terminal; the answer goes straight back to it">
+                    from the terminal
+                  </span>
+                )}
               </p>
               <div className="whitespace-pre-wrap">{message.text}</div>
+              {message.options && message.options.length > 0 && (
+                <div className="mt-2.5">
+                  <QuestionOptions
+                    question={message}
+                    answer={message.answeredBy ? byId.get(message.answeredBy) : null}
+                    onAnswer={(text, choices) => onReply(text, { answers: message.id, choices })}
+                  />
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -894,8 +918,14 @@ function Conversation({ task, onReply }: { task: Task; onReply: (text: string) =
       </div>
 
       <div className="sticky bottom-0 border-t border-[var(--color-line)] bg-[var(--color-surface-1)] p-3">
-        {waiting ? (
-          <p className="mb-2 text-[11.5px] text-amber-300">Claude is blocked on your answer.</p>
+        {task.waiting ? (
+          <TerminalWaitNote wait={task.waiting} />
+        ) : waiting ? (
+          <p className="mb-2 text-[11.5px] text-amber-300">
+            {waiting.options?.length
+              ? 'Claude is blocked on your answer. Pick an option above, or answer in your own words.'
+              : 'Claude is blocked on your answer.'}
+          </p>
         ) : (
           task.column === 'in-progress' && (
             <p className="mb-2 text-[11.5px] text-emerald-300/80">
@@ -926,6 +956,22 @@ function Conversation({ task, onReply }: { task: Task; onReply: (text: string) =
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** A reply from the chat; with `answer`, the answer to that question and the options picked on it. */
+type ReplyFn = (text: string, answer?: { answers: string; choices?: string[] }) => void;
+
+/** Claude is stopped in its terminal on something the board cannot answer. */
+function TerminalWaitNote({ wait }: { wait: TerminalWait }) {
+  return (
+    <div className="mb-2 rounded-md border border-amber-400/30 bg-amber-400/[0.07] px-2.5 py-1.5 text-[11.5px] leading-snug text-amber-200">
+      <p className="font-medium">
+        {wait.kind === 'permission' ? 'Claude needs your permission in its terminal.' : 'Claude is waiting for you in its terminal.'}
+      </p>
+      {wait.text && <p className="mt-0.5 text-amber-100/80">{wait.text}</p>}
+      <p className="mt-0.5 text-amber-200/60">Answer it there. The card goes back to In Progress as soon as Claude carries on.</p>
     </div>
   );
 }

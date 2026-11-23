@@ -6,7 +6,7 @@ import { withLock } from './lock.ts';
 import { workerPresence, type WorkerPresence } from './presence.ts';
 import { envVar, hasBoard } from './paths.ts';
 import { Store } from './store.ts';
-import { pendingQuestion, type Column } from './task.ts';
+import { needsUser, type Column } from './task.ts';
 
 export interface ProjectRecord {
   id: string;
@@ -170,7 +170,7 @@ export function describeProject(record: ProjectRecord): ProjectView {
     summary: {
       queued: tasks.filter((t) => QUEUE.includes(t.column)).length,
       inProgress: tasks.filter((t) => t.column === 'in-progress').length,
-      blocked: tasks.filter((t) => pendingQuestion(t)).length,
+      blocked: tasks.filter((t) => needsUser(t)).length,
       done: tasks.filter((t) => t.column === 'done').length,
       total: tasks.length,
     },

@@ -143,8 +143,9 @@ export function apiFor(projectId: string) {
   removeAttachment: (id: string, fileId: string) =>
     request<Task>(`${base}/tasks/${id}/attachments/${fileId}`, { method: 'DELETE' }),
 
-  reply: (id: string, text: string) =>
-    request<Task>(`${base}/tasks/${id}/messages`, { method: 'POST', body: JSON.stringify({ text }) }),
+  /** A chat message; with `answers`, the reply to that question, and the options picked on it. */
+  reply: (id: string, text: string, answer?: { answers: string; choices?: string[] }) =>
+    request<Task>(`${base}/tasks/${id}/messages`, { method: 'POST', body: JSON.stringify({ text, ...answer }) }),
 
   skills: () => request<SkillSummary[]>(`${base}/skills`),
 

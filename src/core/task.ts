@@ -114,6 +114,17 @@ export interface ActivityEntry {
   model?: string;
 }
 
+/** One choice Claude offers with a question; the board shows it as a button. */
+export interface QuestionOption {
+  label: string;
+  description?: string;
+}
+
+/** Most options one question may offer, and the longest a label or description may be. */
+export const MAX_OPTIONS = 10;
+export const MAX_OPTION_LABEL = 120;
+export const MAX_OPTION_DESCRIPTION = 400;
+
 export interface Message {
   id: string;
   at: string;
@@ -123,6 +134,29 @@ export interface Message {
   needsAnswer?: boolean;
   /** Id of the message that answered this one. */
   answeredBy?: string;
+  /** A question's choices. The user may still answer in their own words. */
+  options?: QuestionOption[];
+  /** More than one option may be picked. */
+  multiSelect?: boolean;
+  /** A short tag for the question, e.g. "Database". */
+  header?: string;
+  /** Questions asked together share a group, and the card waits until all are answered. */
+  group?: string;
+  /** Asked through a Claude Code tool in the terminal and caught by the Ticketrail hook. */
+  source?: 'terminal';
+  /** On an answer: the option labels the user picked. */
+  choices?: string[];
+}
+
+/**
+ * Claude is stopped in its terminal on something the board cannot answer: a
+ * permission prompt, or a turn that ended mid-card. Reported by the
+ * Notification hook, and cleared as soon as the session moves again.
+ */
+export interface TerminalWait {
+  kind: 'permission' | 'idle' | 'other';
+  text: string;
+  at: string;
 }
 
 /** A result that a later run replaced, kept so it can still be read. */
@@ -218,6 +252,8 @@ export interface Task {
   attachments: Attachment[];
   activity: ActivityEntry[];
   messages: Message[];
+  /** Set while Claude waits in its terminal for something only the terminal can give. */
+  waiting: TerminalWait | null;
   createdAt: string;
   updatedAt: string;
   startedAt: string | null;
@@ -308,21 +344,61 @@ export function normalizeTask(raw: any, fallbackId: string): Task {
         }))
       : [],
     messages: Array.isArray(raw?.messages)
-      ? raw.messages.map((m: any, i: number) => ({
-          id: typeof m?.id === 'string' ? m.id : `m${i}`,
-          at: typeof m?.at === 'string' ? m.at : created,
-          role: m?.role === 'user' ? 'user' : 'claude',
-          text: String(m?.text ?? ''),
-          ...(m?.needsAnswer ? { needsAnswer: true } : {}),
-          ...(typeof m?.answeredBy === 'string' ? { answeredBy: m.answeredBy } : {}),
-        }))
+      ? raw.messages.map((m: any, i: number) => {
+          const options = normalizeOptions(m?.options);
+          const choices = Array.isArray(m?.choices) ? m.choices.filter((c: unknown) => typeof c === 'string') : [];
+          return {
+            id: typeof m?.id === 'string' ? m.id : `m${i}`,
+            at: typeof m?.at === 'string' ? m.at : created,
+            role: m?.role === 'user' ? 'user' : 'claude',
+            text: String(m?.text ?? ''),
+            ...(m?.needsAnswer ? { needsAnswer: true } : {}),
+            ...(typeof m?.answeredBy === 'string' ? { answeredBy: m.answeredBy } : {}),
+            ...(options.length ? { options } : {}),
+            ...(options.length && m?.multiSelect === true ? { multiSelect: true } : {}),
+            ...(typeof m?.header === 'string' && m.header.trim() ? { header: m.header.trim().slice(0, 40) } : {}),
+            ...(typeof m?.group === 'string' && m.group ? { group: m.group } : {}),
+            ...(m?.source === 'terminal' ? { source: 'terminal' as const } : {}),
+            ...(choices.length ? { choices } : {}),
+          };
+        })
       : [],
+    // only meaningful while the card sits on User Input; any move away ends it
+    waiting: isColumn(raw?.column) && raw.column === 'user-input' ? normalizeWaiting(raw?.waiting, created) : null,
     createdAt: created,
     updatedAt: typeof raw?.updatedAt === 'string' ? raw.updatedAt : created,
     startedAt: typeof raw?.startedAt === 'string' ? raw.startedAt : null,
     finishedAt: typeof raw?.finishedAt === 'string' ? raw.finishedAt : null,
     cancelRequested: raw?.cancelRequested === true,
     archived: raw?.archived === true,
+  };
+}
+
+/** Keep options with a label, trimmed and capped; duplicates by label are dropped. */
+export function normalizeOptions(values: unknown): QuestionOption[] {
+  if (!Array.isArray(values)) return [];
+  const out: QuestionOption[] = [];
+  const seen = new Set<string>();
+  for (const raw of values) {
+    const source = typeof raw === 'string' ? { label: raw } : raw;
+    const label = typeof source?.label === 'string' ? source.label.trim().slice(0, MAX_OPTION_LABEL) : '';
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    const description =
+      typeof source?.description === 'string' ? source.description.trim().slice(0, MAX_OPTION_DESCRIPTION) : '';
+    out.push(description ? { label, description } : { label });
+    if (out.length === MAX_OPTIONS) break;
+  }
+  return out;
+}
+
+function normalizeWaiting(raw: any, fallbackAt: string): TerminalWait | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const kind = raw.kind === 'permission' || raw.kind === 'idle' ? raw.kind : 'other';
+  return {
+    kind,
+    text: typeof raw.text === 'string' ? raw.text : '',
+    at: typeof raw.at === 'string' ? raw.at : fallbackAt,
   };
 }
 
@@ -347,11 +423,31 @@ function normalizeSession(raw: any): TaskSession | null {
   };
 }
 
-/** The open question blocking a task, if any. */
+function isOpen(m: Message): boolean {
+  return m.role === 'claude' && Boolean(m.needsAnswer) && !m.answeredBy;
+}
+
+/**
+ * The open question blocking a task, if any: the latest one Claude asked, or,
+ * when it was asked together with others, the first of those still open, so
+ * a set of questions is answered in the order it was asked.
+ */
 export function pendingQuestion(task: Task): Message | null {
   for (let i = task.messages.length - 1; i >= 0; i--) {
     const m = task.messages[i];
-    if (m.role === 'claude' && m.needsAnswer && !m.answeredBy) return m;
+    if (!isOpen(m)) continue;
+    if (!m.group) return m;
+    return task.messages.find((q) => q.group === m.group && isOpen(q)) ?? m;
   }
   return null;
+}
+
+/** The card needs the user: an open question, or Claude waiting in its terminal. */
+export function needsUser(task: Task): boolean {
+  return Boolean(task.waiting) || pendingQuestion(task) !== null;
+}
+
+/** Every question still open in a group, in the order they were asked. */
+export function openInGroup(task: Task, group: string): Message[] {
+  return task.messages.filter((m) => m.group === group && isOpen(m));
 }

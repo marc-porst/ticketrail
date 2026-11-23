@@ -40,7 +40,8 @@ Repeat this loop:
      Finish with `{{pk}} done <id> --file <summary.md>`, where the summary says
      what changed, which files, and how it was verified.
    - Call `{{pk}} log <id> "..."` at the real milestones as you go.
-   - When a decision is the user's to make, `{{pk}} ask <id> "..." --wait`.
+   - When a decision is the user's to make, `{{pk}} ask <id> "..." --wait`, with each choice as
+     `--option "..."` so the board shows buttons. Never use AskUserQuestion or plan mode for it.
    - If you cannot finish, `{{pk}} fail <id> "reason"` — never abandon a card in
      In Progress.
 4. Go back to step 1 straight away. There may be more work queued already.

@@ -42,7 +42,7 @@ import {
 import { FolderDragFace } from './components/FolderGroup.tsx';
 import { cx, labelTone } from './lib/ui.ts';
 import { matchesSearch, searchTerms } from './lib/search.ts';
-import { MAX_RELATED, pendingQuestion, type Column, type AgentSummary, type NotificationSettings, type SkillSummary, type Task } from './lib/types.ts';
+import { MAX_RELATED, needsUser, type Column, type AgentSummary, type NotificationSettings, type SkillSummary, type Task } from './lib/types.ts';
 
 // The skills view brings a syntax highlighter; load it only when it is opened.
 const SkillsModal = lazyView(() => import('./components/SkillsModal.tsx').then((m) => m.SkillsModal));
@@ -199,7 +199,7 @@ export default function App() {
     return (snapshot?.tasks ?? []).reduce((n, t) => n + (t.related ?? []).filter((r) => ids.has(r)).length, 0);
   }, [snapshot?.tasks]);
   const active = snapshot?.tasks.find((t) => t.id === activeId) ?? null;
-  const blocked = (snapshot?.tasks ?? []).filter((t) => pendingQuestion(t)).length;
+  const blocked = (snapshot?.tasks ?? []).filter((t) => needsUser(t)).length;
   useEffect(() => {
     if (snapshot?.settings) setSettings(snapshot.settings);
   }, [snapshot?.settings]);
@@ -318,7 +318,7 @@ export default function App() {
       embedded={embedded}
       onClose={onClose}
       onPatch={(changes) => void run(() => api!.patch(task.id, changes).then((t) => (refresh(), t)))}
-      onReply={(text) => void run(() => api!.reply(task.id, text).then((t) => (refresh(), t)))}
+      onReply={(text, answer) => void run(() => api!.reply(task.id, text, answer).then((t) => (refresh(), t)))}
       onUpload={async (files) => {
         for (const file of files) await run(() => api!.upload(task.id, file));
       }}
@@ -643,6 +643,9 @@ export default function App() {
               // finished work piles up: fold all but the latest, unless a search or filter is narrowing the board
               limit={meta.id === 'done' && !terms.length && !labelFilter ? DONE_VISIBLE : undefined}
               onOpen={(task) => setOpenId(task.id)}
+              onAnswer={(task, question, label) =>
+                void run(() => api!.reply(task.id, label, { answers: question.id, choices: [label] }).then((t) => (refresh(), t)))
+              }
               onCreate={
                 meta.id === 'backlog'
                   ? (title) => void run(() => api!.create({ title, column: 'backlog' }).then(refresh))

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { FOLDER_TONE, cx, mergeRefs } from '../lib/ui.ts';
 import { folderDragId, folderDropId } from '../lib/drop.ts';
-import { pendingQuestion, type Column, type Folder, type Task } from '../lib/types.ts';
+import { needsUser, type Column, type Folder, type Task } from '../lib/types.ts';
 
 /**
  * One folder's cards inside one lane. The header is a drop target (drop a card
@@ -36,7 +36,7 @@ export function FolderGroup({
   const drag = useDraggable({ id: folderDragId(column, folder.id), data: { folderId: folder.id, column } });
   const tone = FOLDER_TONE[folder.color];
   const live = tasks.some((t) => t.column === 'in-progress');
-  const waiting = tasks.filter((t) => pendingQuestion(t)).length;
+  const waiting = tasks.filter((t) => needsUser(t)).length;
 
   return (
     // only the header is a drop target: the cards inside keep their own reorder and link zones

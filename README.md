@@ -100,7 +100,11 @@ yellow, and a badge at the top of the board says **"1 waiting on you"**.
 </p>
 
 Open the card, type your answer in the **Chat**, and press **Send**. That's it. Claude reads
-it and carries on by itself.
+it and carries on by itself. When Claude offers choices, they show up as buttons, right on the
+card and in the chat: one click answers.
+
+If Claude is stuck in its terminal on something only the terminal can answer, like a
+permission prompt, the card moves to **User Input** too and says so, so you know where to look.
 
 ### Watching the work ⚡
 
@@ -269,6 +273,11 @@ in Terminal), paste the line you copied, and press <kbd>Enter</kbd>. Claude star
 Claude now says it's waiting for cards. Leave this window open, too. ☕ Back on the board, the
 dot at the top right turns green and reads **worker ready**.
 
+> 💡 **The very first time** in a space, Claude may say it has *installed the Ticketrail hooks*
+> and asks you to restart it. Those are small helpers that send its questions to the board instead
+> of the Terminal. When it fits, close the window, open a new one and do step 5 again. You only do
+> this once per space.
+
 **Step 6: done!** Pick the new space in the project menu and write your first card. Each space
 needs its own Claude window (step 5); the board itself serves all of them.
 
@@ -432,6 +441,15 @@ off <b>Keep session history</b> in Settings ⚙️.
 </details>
 
 <details>
+<summary><b>The card says "waiting in the terminal". What do I do?</b></summary>
+
+Claude is stuck on something only its Terminal window can answer, usually a question like
+<i>"Do you want to allow this command?"</i>. Switch to the Claude window for this space, answer
+there, and the card moves back to <i>In Progress</i> by itself. Questions with choices never end up
+there: they show up on the card as buttons.
+</details>
+
+<details>
 <summary><b>The dot at the top right is red or grey.</b></summary>
 
 Red (<i>offline</i>) means the page can't reach the board server. Reload the page, and if that
@@ -472,6 +490,8 @@ ticketrail init
 That is a shell command — run it in a terminal, or as `! ticketrail init` inside a Claude
 Code session. It creates `.ticketrail/` for the board data and installs the skill plus the
 `/ticketrail-start`, `/ticketrail-work` and `/ticketrail-add` commands into that project's `.claude/`.
+It also adds the Claude Code hooks that bring questions and terminal waits onto the card to
+`.claude/settings.local.json` (per machine, not committed); see [Working a card](#working-a-card).
 
 Now open Claude Code there. The first time, run `/reload-skills` so it picks up the new
 commands, then:
@@ -483,6 +503,11 @@ commands, then:
 
 `/ticketrail-work` blocks on the board and takes a card the moment you drag one into **Plan** or
 **Implement**. Wrap it in `/loop /ticketrail-work` to leave it running unattended.
+
+**After updating Ticketrail**, run `ticketrail init --force` in each project. Plain `init` only adds
+what is missing, so the skill and commands in `.claude/` would stay at the old version; `--force`
+rewrites them (local edits to those files are lost). Then restart the worker sessions: Claude Code
+reads skills and hooks when a session starts.
 
 ## Several projects, one board
 
@@ -549,6 +574,22 @@ Each card carries a description, the plan Claude wrote, an activity feed of what
 right now, and a chat thread. When Claude needs a decision it asks in the thread and the card
 moves to **User Input** — you answer in the card, and the blocked worker picks the answer up
 and carries on. You never have to switch to the terminal.
+
+A question can come with choices (`ask <id> "..." --option A --option B`), which the board shows
+as buttons on the card face and in the chat. Claude Code's own question picker
+(`AskUserQuestion`) and plan-mode approval are caught by a hook that `ticketrail init` installs
+into `.claude/settings.local.json`: the question lands on the card instead of the terminal, and
+the answer goes back to Claude. The same hooks notice a permission prompt or a turn that ended
+mid-card, move the card to **User Input** with a "waiting in the terminal" note, and move it back
+once Claude carries on.
+
+The hooks are written per machine and point at the installed CLI by its absolute path, so they
+work however Ticketrail is installed (from a checkout, as a project dependency, or globally).
+`ticketrail init` installs them, and a worker installs them itself on its first `next` where they
+are missing, including a fresh git worktree. Claude Code loads hooks when a session starts, so a
+worker that just installed them says so, and they apply once you restart it. Moved or reinstalled
+Ticketrail? The next `next` or `init` repoints them. Set `"hooks": false` in
+`.ticketrail/config.json` to never install them.
 
 ## Card types
 
@@ -899,6 +940,7 @@ wait [--timeout 0]               block until Plan/Implement has a card; never cl
 check <id>                       has the user pulled this card back?          -> JSON
 log <id> "text" [--kind]         append to the card's activity feed
 ask <id> "question" [--wait]     park on User Input, block for the answer     -> JSON
+  [--option "A" --option "B|what B means"] [--multi] [--header "Topic"]   choices shown as buttons
 plan <id> --file <plan.md>       store the plan, move to Planned
 done <id> --file <summary.md>    store the result, move to Done
 fail <id> "reason"               stop and hand the card back to the user
@@ -918,6 +960,9 @@ folder add "name" [--color]              create a folder  (rename, color, remove
 file <id> <folder|none>                  put a card in a folder, or take it out
 status                                   human-readable summary
 projects [add|remove <path>]             boards the switcher offers
+
+hook <pre-tool|notify|resume>            the Claude Code hooks; reads the hook JSON on stdin.
+                                         Installed by init and next, not run by hand
 ```
 
 Text arguments accept `--text "..."`, `--file <path>`, or `--file -` for stdin.
@@ -953,6 +998,10 @@ that same lock, so two worker sessions never get the same one.
 Each card's Session tab data lives in two places. The card file holds a pointer: `session` (the
 current run's transcript and byte range) and `sessionHistory` (earlier runs). The saved copies of
 the runs' entries are in `.ticketrail/sessions/<card>/<run>.json`. See [The Session tab](#the-session-tab).
+
+A chat message can carry a question's `options` (with `multiSelect`, `header`, and `group` for
+questions asked together), and an answer the `choices` picked. A card held up by its worker's
+terminal has a `waiting` note (`kind`, `text`, `at`), which only lasts while it sits on User Input.
 
 Commit `.ticketrail/tasks/` — the board is part of the project. `.locks/`, `.runtime/` and
 `sessions/` are ignored; the session copies can contain anything a command printed.

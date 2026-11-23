@@ -417,3 +417,24 @@ describe('skill import over HTTP', () => {
     fs.rmSync(repo, { recursive: true, force: true });
   });
 });
+
+describe('answering a question', () => {
+  it('takes the question and the picked option, and refuses a closed question', async () => {
+    const store = new Store(alpha);
+    const card = store.create({ title: 'pick', column: 'in-progress' });
+    const { message } = store.ask(card.id, 'Which?', { options: ['One', 'Two'] });
+    const pid = projectId(alpha);
+
+    const first = await send('POST', `/api/projects/${pid}/tasks/${card.id}/messages`, {
+      text: 'Two',
+      answers: message.id,
+      choices: ['Two', 42],
+    });
+    expect(first.status).toBe(201);
+    expect(first.body.column).toBe('in-progress');
+    expect(first.body.messages.at(-1)).toMatchObject({ role: 'user', text: 'Two', choices: ['Two'] });
+
+    const again = await send('POST', `/api/projects/${pid}/tasks/${card.id}/messages`, { text: 'One', answers: message.id });
+    expect(again.status).toBe(409);
+  });
+});
