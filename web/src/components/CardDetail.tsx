@@ -881,7 +881,7 @@ function Conversation({ task, onReply }: { task: Task; onReply: ReplyFn }) {
                 'max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed',
                 message.role === 'user'
                   ? 'bg-sky-500/15 text-sky-50'
-                  : message.needsAnswer && !message.answeredBy
+                  : message.needsAnswer && !message.answeredBy && !message.withdrawn
                     ? 'border border-amber-500/40 bg-amber-500/10 text-amber-50'
                     : 'bg-[var(--color-surface-3)] text-zinc-200',
               )}
@@ -902,6 +902,7 @@ function Conversation({ task, onReply }: { task: Task; onReply: ReplyFn }) {
                 )}
               </p>
               <div className="whitespace-pre-wrap">{message.text}</div>
+              {message.withdrawn && <p className="mt-1.5 text-[11.5px] text-zinc-500 italic">{message.withdrawn}</p>}
               {message.options && message.options.length > 0 && (
                 <div className="mt-2.5">
                   <QuestionOptions

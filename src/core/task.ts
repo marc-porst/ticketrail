@@ -146,6 +146,12 @@ export interface Message {
   source?: 'terminal';
   /** On an answer: the option labels the user picked. */
   choices?: string[];
+  /** On a terminal question: which tool call it stands for, so the hooks can tell when the terminal answered it. */
+  tool?: string;
+  /** On a terminal question: the process of the hook waiting for its answer. */
+  pid?: number;
+  /** Set when the question was settled elsewhere (in the terminal) and no longer needs an answer here. */
+  withdrawn?: string;
 }
 
 /**
@@ -360,6 +366,9 @@ export function normalizeTask(raw: any, fallbackId: string): Task {
             ...(typeof m?.group === 'string' && m.group ? { group: m.group } : {}),
             ...(m?.source === 'terminal' ? { source: 'terminal' as const } : {}),
             ...(choices.length ? { choices } : {}),
+            ...(typeof m?.tool === 'string' && m.tool ? { tool: m.tool } : {}),
+            ...(Number.isInteger(m?.pid) && m.pid > 0 ? { pid: m.pid } : {}),
+            ...(typeof m?.withdrawn === 'string' && m.withdrawn ? { withdrawn: m.withdrawn } : {}),
           };
         })
       : [],
@@ -424,7 +433,7 @@ function normalizeSession(raw: any): TaskSession | null {
 }
 
 function isOpen(m: Message): boolean {
-  return m.role === 'claude' && Boolean(m.needsAnswer) && !m.answeredBy;
+  return m.role === 'claude' && Boolean(m.needsAnswer) && !m.answeredBy && !m.withdrawn;
 }
 
 /**

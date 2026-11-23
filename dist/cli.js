@@ -317,17 +317,17 @@ import path5 from "path";
 var MAX_READ_BYTES = 8 * 1024 * 1024;
 var MAX_OUTPUT = 4e3;
 var MAX_SUMMARY = 160;
-function readTranscript(file, from, to, maxBytes = MAX_READ_BYTES) {
+function readTranscript(file, from2, to, maxBytes = MAX_READ_BYTES) {
   let size;
   try {
     size = fs4.statSync(file).size;
   } catch {
-    return { records: [], next: from, clipped: false };
+    return { records: [], next: from2, clipped: false };
   }
   const end = Math.min(to ?? size, size);
-  if (end <= from) return { records: [], next: from, clipped: false };
-  const start = Math.max(from, end - maxBytes);
-  const clipped = start > from;
+  if (end <= from2) return { records: [], next: from2, clipped: false };
+  const start = Math.max(from2, end - maxBytes);
+  const clipped = start > from2;
   let buf;
   try {
     const fd = fs4.openSync(file, "r");
@@ -338,11 +338,11 @@ function readTranscript(file, from, to, maxBytes = MAX_READ_BYTES) {
       fs4.closeSync(fd);
     }
   } catch {
-    return { records: [], next: from, clipped: false };
+    return { records: [], next: from2, clipped: false };
   }
   const first = clipped ? buf.indexOf(10) + 1 : 0;
   const last = buf.lastIndexOf(10);
-  if (last < first) return { records: [], next: clipped ? start : from, clipped };
+  if (last < first) return { records: [], next: clipped ? start : from2, clipped };
   const records = [];
   let offset = start + first;
   for (const line of buf.subarray(first, last + 1).toString("utf8").split("\n")) {
@@ -479,11 +479,11 @@ function subagentDir(transcript) {
   return path5.join(path5.dirname(transcript), path5.basename(transcript, ".jsonl"), "subagents");
 }
 var SessionReader = class {
-  constructor(transcript, from, root, maxBytes = MAX_READ_BYTES) {
+  constructor(transcript, from2, root, maxBytes = MAX_READ_BYTES) {
     this.transcript = transcript;
     this.root = root;
     this.maxBytes = maxBytes;
-    this.next = from;
+    this.next = from2;
   }
   transcript;
   root;
@@ -815,7 +815,10 @@ function normalizeTask(raw, fallbackId) {
         ...typeof m?.header === "string" && m.header.trim() ? { header: m.header.trim().slice(0, 40) } : {},
         ...typeof m?.group === "string" && m.group ? { group: m.group } : {},
         ...m?.source === "terminal" ? { source: "terminal" } : {},
-        ...choices.length ? { choices } : {}
+        ...choices.length ? { choices } : {},
+        ...typeof m?.tool === "string" && m.tool ? { tool: m.tool } : {},
+        ...Number.isInteger(m?.pid) && m.pid > 0 ? { pid: m.pid } : {},
+        ...typeof m?.withdrawn === "string" && m.withdrawn ? { withdrawn: m.withdrawn } : {}
       };
     }) : [],
     // only meaningful while the card sits on User Input; any move away ends it
@@ -872,7 +875,7 @@ function normalizeSession(raw) {
   };
 }
 function isOpen(m) {
-  return m.role === "claude" && Boolean(m.needsAnswer) && !m.answeredBy;
+  return m.role === "claude" && Boolean(m.needsAnswer) && !m.answeredBy && !m.withdrawn;
 }
 function pendingQuestion(task) {
   for (let i = task.messages.length - 1; i >= 0; i--) {
@@ -930,6 +933,15 @@ function readJson(file) {
     return JSON.parse(fs5.readFileSync(file, "utf8"));
   } catch {
     return null;
+  }
+}
+function alive(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
   }
 }
 var Store = class _Store {
@@ -1443,7 +1455,7 @@ var Store = class _Store {
     const opts = typeof options === "boolean" ? { needsAnswer: options } : options;
     let created;
     const task = this.update(id, (t) => {
-      const question = role === "user" ? opts.answers ? t.messages.find((m) => m.id === opts.answers && m.role === "claude" && m.needsAnswer && !m.answeredBy) ?? null : pendingQuestion(t) : null;
+      const question = role === "user" ? opts.answers ? t.messages.find((m) => m.id === opts.answers && m.role === "claude" && m.needsAnswer && !m.answeredBy && !m.withdrawn) ?? null : pendingQuestion(t) : null;
       if (role === "user" && opts.answers && !question) {
         throw refuse(409, "That question is not open any more");
       }
@@ -1478,7 +1490,7 @@ var Store = class _Store {
    * Park a task on "User Input" with one or more questions, asked together.
    * With several, they share a group and the card waits until all are answered.
    */
-  askAll(id, questions, source) {
+  askAll(id, questions, from2) {
     if (!questions.length) throw new Error("Nothing to ask");
     const created = [];
     const group = questions.length > 1 ? makeId("g") : void 0;
@@ -1496,7 +1508,9 @@ var Store = class _Store {
           ...options.length && q.multiSelect ? { multiSelect: true } : {},
           ...header ? { header } : {},
           ...group ? { group } : {},
-          ...source ? { source } : {}
+          ...from2 ? { source: from2.source } : {},
+          ...from2?.tool ? { tool: from2.tool } : {},
+          ...from2?.pid ? { pid: from2.pid } : {}
         };
         t.messages.push(message);
         created.push(message);
@@ -1546,17 +1560,42 @@ var Store = class _Store {
       }
     });
   }
-  /** The session moved again: a card it held for the terminal goes back to In Progress. */
-  resume(sessionId) {
+  /**
+   * The session moved again: a card it held for the terminal goes back to In
+   * Progress. With `settled`, terminal questions the terminal answered first
+   * are taken off the card too: the ones for that tool call (`tool`), or all
+   * of them (`'all'`, e.g. the user typed a new prompt in the terminal), or
+   * those whose hook is gone (`'orphaned'`): nothing can deliver their answer.
+   */
+  resume(sessionId, settled) {
     const card = this.cardOfSession(sessionId);
-    if (!card?.waiting) return null;
+    if (!card) return null;
+    const matches = (m) => m.source === "terminal" && m.role === "claude" && m.needsAnswer && !m.answeredBy && !m.withdrawn && (settled === "all" || settled === "orphaned" && !alive(m.pid) || typeof settled === "object" && m.tool === settled.tool);
+    if (!card.waiting && !card.messages.some(matches)) return null;
     return this.update(card.id, (t) => {
-      if (!t.waiting) return false;
+      const stale = settled ? t.messages.filter(matches) : [];
+      if (!t.waiting && !stale.length) return false;
       t.waiting = null;
+      for (const m of stale) m.withdrawn = "Answered in the terminal.";
+      if (stale.length) t.activity.push(this.status("Answered in the terminal."));
       if (t.column === "user-input" && !pendingQuestion(t)) {
         t.column = t.returnColumn ?? "in-progress";
         t.returnColumn = null;
         t.activity.push(this.status("Back to work."));
+      }
+    });
+  }
+  /** Take questions off a card that no longer need an answer here (the terminal settled them). */
+  withdraw(id, ids, reason = "Answered in the terminal.") {
+    if (!this.get(id)) return null;
+    return this.update(id, (t) => {
+      const stale = t.messages.filter((m) => ids.includes(m.id) && m.needsAnswer && !m.answeredBy && !m.withdrawn);
+      if (!stale.length) return false;
+      for (const m of stale) m.withdrawn = reason;
+      t.activity.push(this.status(reason));
+      if (t.column === "user-input" && !pendingQuestion(t) && !t.waiting) {
+        t.column = t.returnColumn ?? "in-progress";
+        t.returnColumn = null;
       }
     });
   }
@@ -1583,9 +1622,9 @@ var Store = class _Store {
         task.finishedAt = null;
         task.cancelRequested = false;
         task.claimedBy = worker;
-        const from = this.session ? sizeOf(this.session.transcript) : null;
-        if (this.session && from !== null) {
-          task.session = { ...this.session, from, to: null, run: makeId("r"), startedAt: task.startedAt, saved: false };
+        const from2 = this.session ? sizeOf(this.session.transcript) : null;
+        if (this.session && from2 !== null) {
+          task.session = { ...this.session, from: from2, to: null, run: makeId("r"), startedAt: task.startedAt, saved: false };
         }
         const previous = task.model;
         if (this.model) task.model = this.model;
@@ -1822,7 +1861,7 @@ import path7 from "path";
 var HEARTBEAT_MS = 15e3;
 var STALE_MS2 = 45e3;
 var LAST_SEEN = "last-seen";
-function alive(pid) {
+function alive2(pid) {
   try {
     process.kill(pid, 0);
     return true;
@@ -1893,7 +1932,7 @@ function workerPresence(store, now2 = Date.now()) {
       if (!name.endsWith(".json")) continue;
       const beat = JSON.parse(fs6.readFileSync(file, "utf8"));
       const at = Date.parse(beat.seenAt);
-      if (!Number.isFinite(at) || now2 - at > STALE_MS2 || !alive(beat.pid)) {
+      if (!Number.isFinite(at) || now2 - at > STALE_MS2 || !alive2(beat.pid)) {
         fs6.rmSync(file, { force: true });
         continue;
       }
@@ -2041,12 +2080,13 @@ function describeProjects() {
 var HOOKS_FILE = path9.join(".claude", "settings.local.json");
 var QUESTION_HOOK_TIMEOUT_S = 3600;
 function isOurs(command) {
-  return typeof command === "string" && /ticketrail|cli\.js/.test(command) && /\bhook (pre-tool|notify|resume)\b/.test(command);
+  return typeof command === "string" && /ticketrail|cli\.js/.test(command) && /\bhook (pre-tool|permission|notify|resume)\b/.test(command);
 }
 function hookEntries(cli) {
   const run2 = (event, extra = {}) => ({ type: "command", command: `${cli} hook ${event}`, ...extra });
   return {
     PreToolUse: [{ matcher: "AskUserQuestion|ExitPlanMode", hooks: [run2("pre-tool", { timeout: QUESTION_HOOK_TIMEOUT_S })] }],
+    PermissionRequest: [{ matcher: "*", hooks: [run2("permission", { timeout: QUESTION_HOOK_TIMEOUT_S })] }],
     Notification: [{ hooks: [run2("notify")] }],
     PostToolUse: [{ matcher: "*", hooks: [run2("resume")] }],
     UserPromptSubmit: [{ hooks: [run2("resume")] }]
@@ -2153,10 +2193,10 @@ function samePath(a, b) {
     return path9.resolve(a) === path9.resolve(b);
   }
 }
-function copyTree(from, to, force, written, root) {
+function copyTree(from2, to, force, written, root) {
   fs8.mkdirSync(to, { recursive: true });
-  for (const entry of fs8.readdirSync(from, { withFileTypes: true })) {
-    const src = path9.join(from, entry.name);
+  for (const entry of fs8.readdirSync(from2, { withFileTypes: true })) {
+    const src = path9.join(from2, entry.name);
     const dest = path9.join(to, entry.name);
     if (entry.isDirectory()) {
       copyTree(src, dest, force, written, root);
@@ -3178,7 +3218,7 @@ data: ${JSON.stringify(data)}
     res.end();
     return;
   }
-  const { transcript, from } = opened.task.session;
+  const { transcript, from: from2 } = opened.task.session;
   const reader = opened.reader;
   let closed = false;
   let watcher = null;
@@ -3192,7 +3232,7 @@ data: ${JSON.stringify(data)}
   const check = () => {
     if (closed) return;
     const task = store.get(id);
-    const same = task?.session?.transcript === transcript && task.session.from === from;
+    const same = task?.session?.transcript === transcript && task.session.from === from2;
     const to = same ? task.session.to : null;
     const entries = reader.read(to);
     if (entries.length) send("entries", entries);
@@ -4118,13 +4158,28 @@ function projectsCommand(args, positional) {
 }
 
 // src/cli/commands/hook.ts
-var HOOK_EVENTS = ["pre-tool", "notify", "resume"];
+import { createHash } from "crypto";
+var HOOK_EVENTS = ["pre-tool", "permission", "notify", "resume"];
 var HOOK_TIMEOUT_S = 3600;
 var DEFAULT_WAIT_S = HOOK_TIMEOUT_S - 60;
 var APPROVE = "Approve";
 var KEEP_PLANNING = "Keep planning";
-function decide(permissionDecision, permissionDecisionReason) {
-  return { hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision, permissionDecisionReason } };
+var ALLOW = "Allow";
+var DENY = "Deny";
+function decide(permissionDecision, permissionDecisionReason, updatedInput) {
+  return {
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision,
+      permissionDecisionReason,
+      ...updatedInput ? { updatedInput } : {}
+    }
+  };
+}
+function toolKey(name, input) {
+  if (!name) return "";
+  if (name === "AskUserQuestion" || name === "ExitPlanMode") return name;
+  return createHash("sha1").update(`${name}\0${JSON.stringify(input ?? null)}`).digest("hex").slice(0, 16);
 }
 async function awaitAnswers(store, taskId, asked, timeoutMs2) {
   const ids = asked.map((m) => m.id);
@@ -4132,6 +4187,7 @@ async function awaitAnswers(store, taskId, asked, timeoutMs2) {
     const task = store.get(taskId);
     if (!task) return { status: "cancelled", task: null };
     const questions = ids.map((id) => task.messages.find((m) => m.id === id));
+    if (questions.some((q) => !q || q.withdrawn)) return { status: "withdrawn", task };
     const answers = questions.map((q) => q?.answeredBy ? task.messages.find((m) => m.id === q.answeredBy) : void 0);
     if (questions.every((q, i) => q && answers[i])) {
       return { status: "answered", task, answers: questions.map((q, i) => ({ question: q, answer: answers[i] })) };
@@ -4139,54 +4195,69 @@ async function awaitAnswers(store, taskId, asked, timeoutMs2) {
     if (task.column !== "user-input") return { status: "cancelled", task };
     return null;
   };
+  const letGo = () => {
+    try {
+      store.withdraw(taskId, ids);
+    } catch {
+    }
+  };
+  const onSignal = () => {
+    letGo();
+    process.exit(0);
+  };
+  const signals = ["SIGTERM", "SIGINT", "SIGHUP"];
+  for (const s of signals) process.on(s, onSignal);
+  const parent = process.ppid;
+  const orphaned = setInterval(() => {
+    if (process.ppid !== parent) onSignal();
+  }, 2e3);
+  orphaned.unref();
   touchWorker(store);
   const stop = startHeartbeat(store);
   try {
-    return await waitFor(store, probe, timeoutMs2) ?? { status: "timeout", task: store.get(taskId) };
+    const outcome = await waitFor(store, probe, timeoutMs2) ?? { status: "timeout", task: store.get(taskId) };
+    if (outcome.status === "timeout") letGo();
+    return outcome;
   } finally {
+    clearInterval(orphaned);
+    for (const s of signals) process.off(s, onSignal);
     stop();
     touchWorker(store);
   }
 }
-function duration(ms) {
-  const minutes = Math.round(ms / 6e4);
-  if (minutes >= 1) return `${minutes} minute${minutes > 1 ? "s" : ""}`;
-  const seconds = Math.max(1, Math.round(ms / 1e3));
-  return `${seconds} second${seconds > 1 ? "s" : ""}`;
-}
-function notAnswered(outcome, card, timeoutMs2) {
-  if (outcome.status === "cancelled") {
-    const where = outcome.task ? `it is now in ${COLUMN_LABELS[outcome.task.column]}` : "it was deleted";
-    return `The user did not answer on the Ticketrail board: they moved card #${card.number} away from User Input (${where}). Do not ask again. Run \`ticketrail check ${card.id}\` and do what it says.`;
-  }
-  return `Nobody answered on the Ticketrail board within ${duration(timeoutMs2)}. The question stays on card #${card.number} in User Input. Stop working on this card, tell the user you are waiting for their answer there, and move on.`;
+function notAnswered(outcome, card) {
+  if (outcome.status !== "cancelled") return null;
+  const where = outcome.task ? `it is now in ${COLUMN_LABELS[outcome.task.column]}` : "it was deleted";
+  return decide(
+    "deny",
+    `The user did not answer on the Ticketrail board: they moved card #${card.number} away from User Input (${where}). Do not ask again. Run \`ticketrail check ${card.id}\` and do what it says.`
+  );
 }
 function answerText(answer) {
   return answer.choices?.length ? answer.choices.join(", ") : answer.text;
 }
+function from(input, pid = process.pid) {
+  return { source: "terminal", tool: toolKey(input.tool_name, input.tool_input), pid };
+}
 async function askOnBoard(store, card, input, timeoutMs2) {
-  const questions = (Array.isArray(input?.questions) ? input.questions : []).filter((q) => typeof q?.question === "string" && q.question.trim()).map((q) => ({
+  const raw = Array.isArray(input.tool_input?.questions) ? input.tool_input.questions : [];
+  const questions = raw.filter((q) => typeof q?.question === "string" && q.question.trim()).map((q) => ({
+    key: q.question,
     text: q.question.trim(),
     header: typeof q.header === "string" ? q.header : void 0,
     options: Array.isArray(q.options) ? q.options : [],
     multiSelect: q.multiSelect === true
   }));
   if (!questions.length) return null;
-  const { messages } = store.askAll(card.id, questions, "terminal");
+  const { messages } = store.askAll(card.id, questions, from(input));
   const outcome = await awaitAnswers(store, card.id, messages, timeoutMs2);
-  if (outcome.status !== "answered") return decide("deny", notAnswered(outcome, card, timeoutMs2));
-  const lines = outcome.answers.map(({ question, answer }) => `- "${question.text}" \u2192 ${answerText(answer)}`);
-  return decide(
-    "deny",
-    [
-      `The user answered on the Ticketrail board (card #${card.number}), so the question was not shown in the terminal. Their answers:`,
-      ...lines,
-      `Carry on with these answers. Do not ask the same question again. Next time, ask with \`ticketrail ask ${card.id} "..." --option "..." --wait\`.`
-    ].join("\n")
-  );
+  if (outcome.status !== "answered") return notAnswered(outcome, card);
+  const answers = {};
+  outcome.answers.forEach(({ answer }, i) => answers[questions[i].key] = answerText(answer));
+  return decide("allow", `Answered on the Ticketrail board (card #${card.number}).`, { ...input.tool_input, answers });
 }
 async function approvePlanOnBoard(store, card, input, timeoutMs2) {
-  const plan = typeof input?.plan === "string" ? input.plan.trim() : "";
+  const plan = typeof input.tool_input?.plan === "string" ? input.tool_input.plan.trim() : "";
   const { messages } = store.askAll(
     card.id,
     [
@@ -4199,17 +4270,66 @@ async function approvePlanOnBoard(store, card, input, timeoutMs2) {
         ]
       }
     ],
-    "terminal"
+    from(input)
   );
   const outcome = await awaitAnswers(store, card.id, messages, timeoutMs2);
-  if (outcome.status !== "answered") return decide("deny", notAnswered(outcome, card, timeoutMs2));
+  if (outcome.status !== "answered") return notAnswered(outcome, card);
   const answer = outcome.answers[0].answer;
   const approved = answer.choices?.includes(APPROVE) || answer.text.trim().toLowerCase() === APPROVE.toLowerCase();
-  if (approved) return decide("allow", `The user approved the plan on the Ticketrail board (card #${card.number}).`);
+  if (approved) {
+    return decide("allow", `The user approved the plan on the Ticketrail board (card #${card.number}).`, input.tool_input ?? {});
+  }
   return decide(
     "deny",
     `The user did not approve leaving plan mode on the Ticketrail board (card #${card.number}). Their answer: ${answerText(answer)}`
   );
+}
+function describeTool2(name, input) {
+  const s = (v) => typeof v === "string" ? v.trim() : "";
+  const command = s(input?.command);
+  if (command) {
+    const why = s(input?.description);
+    return `${why ? why + "\n\n" : ""}\`${command.length > 600 ? command.slice(0, 600) + "\u2026" : command}\``;
+  }
+  const file = s(input?.file_path) || s(input?.notebook_path) || s(input?.path);
+  if (file) return `${name} ${file}`;
+  const url = s(input?.url);
+  if (url) return `${name} ${url}`;
+  const json = JSON.stringify(input ?? {});
+  return json && json !== "{}" ? `${name} ${json.length > 300 ? json.slice(0, 300) + "\u2026" : json}` : name;
+}
+function permit(decision) {
+  return { hookSpecificOutput: { hookEventName: "PermissionRequest", decision } };
+}
+async function permissionOnBoard(store, card, input, timeoutMs2) {
+  const name = input.tool_name ?? "a tool";
+  const { messages } = store.askAll(
+    card.id,
+    [
+      {
+        text: `Claude wants to use ${name}:
+
+${describeTool2(name, input.tool_input)}`,
+        header: "Permission",
+        options: [
+          { label: ALLOW, description: "Let Claude do this once" },
+          { label: DENY, description: "Claude skips it and carries on; write why to steer it" }
+        ]
+      }
+    ],
+    from(input)
+  );
+  const outcome = await awaitAnswers(store, card.id, messages, timeoutMs2);
+  if (outcome.status !== "answered") return null;
+  const answer = outcome.answers[0].answer;
+  const said = answer.text.trim();
+  if (answer.choices?.includes(ALLOW) || said.toLowerCase() === ALLOW.toLowerCase()) return permit({ behavior: "allow" });
+  const reason = answer.choices?.includes(DENY) || said.toLowerCase() === DENY.toLowerCase() ? "" : said;
+  return permit({
+    behavior: "deny",
+    interrupt: false,
+    message: `The user denied this on the Ticketrail board (card #${card.number}).` + (reason ? ` They said: ${reason}` : "") + " Do not try the same thing again. Carry on without it, or ask on the card with `ticketrail ask` if you are stuck."
+  });
 }
 function waitKind(input) {
   switch (input.notification_type) {
@@ -4232,21 +4352,26 @@ function waitKind(input) {
 }
 var WAIT_TEXT = {
   permission: "Claude needs your permission in the terminal.",
-  idle: "Claude stopped and is waiting for you in the terminal.",
+  idle: "Claude stopped and is waiting for you in the terminal. Type there to carry on.",
   other: "Claude is waiting for you in the terminal."
 };
 async function runHook(store, event, input, options = {}) {
   const sessionId = input.session_id ?? "";
   if (!sessionId) return null;
   if (event === "resume") {
-    store.resume(sessionId);
+    store.resume(
+      sessionId,
+      input.hook_event_name === "UserPromptSubmit" ? "all" : { tool: toolKey(input.tool_name, input.tool_input) }
+    );
     return null;
   }
   const card = store.cardOfSession(sessionId);
   if (!card) return null;
   if (event === "notify") {
     const kind = waitKind(input);
-    if (kind && !(card.column === "user-input" && !card.waiting)) {
+    if (kind === "idle") store.resume(sessionId, "orphaned");
+    const now2 = store.get(card.id) ?? card;
+    if (kind && !(now2.column === "user-input" && !now2.waiting)) {
       store.markWaiting(card.id, { kind, text: input.message?.trim() || WAIT_TEXT[kind] });
     }
     return null;
@@ -4255,8 +4380,12 @@ async function runHook(store, event, input, options = {}) {
   const fresh = store.get(card.id);
   if (!fresh || fresh.column !== "in-progress") return null;
   const timeoutMs2 = options.timeoutMs ?? DEFAULT_WAIT_S * 1e3;
-  if (input.tool_name === "AskUserQuestion") return askOnBoard(store, fresh, input.tool_input, timeoutMs2);
-  if (input.tool_name === "ExitPlanMode") return approvePlanOnBoard(store, fresh, input.tool_input, timeoutMs2);
+  if (event === "permission") {
+    if (input.tool_name === "AskUserQuestion" || input.tool_name === "ExitPlanMode") return null;
+    return permissionOnBoard(store, fresh, input, timeoutMs2);
+  }
+  if (input.tool_name === "AskUserQuestion") return askOnBoard(store, fresh, input, timeoutMs2);
+  if (input.tool_name === "ExitPlanMode") return approvePlanOnBoard(store, fresh, input, timeoutMs2);
   return null;
 }
 function readStdin2() {

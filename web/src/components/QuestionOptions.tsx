@@ -24,7 +24,7 @@ export function QuestionOptions({
   const options = question.options ?? [];
   if (!options.length) return null;
 
-  const answered = Boolean(question.answeredBy);
+  const answered = Boolean(question.answeredBy || question.withdrawn);
   const chosen = new Set(answer?.choices ?? []);
   const multi = question.multiSelect === true;
 

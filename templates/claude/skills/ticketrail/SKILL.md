@@ -165,12 +165,13 @@ installs them where they are missing (a new machine, a fresh worktree). When `ne
 `hooksNote`, tell the user once that the hooks apply from the next session and they should
 restart this worker when convenient. The hooks only act on the card your session holds:
 
-- **AskUserQuestion / ExitPlanMode** are caught before the terminal shows them. The question
-  lands on the card with its options as buttons, and the tool is blocked with the user's answer
-  as the reason. Read that reason as the answer.
-- **A permission prompt, or a turn that ended mid-card,** moves the card to User Input with a
-  "waiting in the terminal" note, so the user knows to look. The card goes back to In Progress
-  as soon as you carry on.
+- **AskUserQuestion / ExitPlanMode** land on the card with their options as buttons. The answer
+  given there comes back as the tool's normal result.
+- **A permission prompt** lands on the card as Allow / Deny. On a deny you get the user's reason
+  and keep going: do not retry the same thing, carry on without it or ask on the card.
+- The terminal can answer any of these too; whichever answers first wins.
+- **A turn that ended mid-card** moves the card to User Input with a "waiting in the terminal"
+  note. The card goes back to In Progress as soon as you carry on.
 
 
 Cards can carry files — screenshots of a bug, a design, a log, a CSV. They live in
